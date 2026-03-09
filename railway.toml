@@ -1,11 +1,6 @@
 [build]
 builder = "dockerfile"
-
-# ── Backend service ───────────────────────────────────────────────────────────
-[services.backend]
 dockerfilePath = "backend/Dockerfile"
-startCommand   = "uvicorn main:app --host 0.0.0.0 --port 8000"
 
-# ── Frontend service ──────────────────────────────────────────────────────────
-[services.frontend]
-dockerfilePath = "frontend/Dockerfile"
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port 8000"
