@@ -1,0 +1,133 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base resets ──────────────────────────────────────────────────────────── */
+
+@layer base {
+  html {
+    @apply bg-navy-900 text-slate-100 antialiased;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  body {
+    @apply min-h-screen;
+  }
+
+  /* Thin scrollbar on webkit browsers */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-navy-800;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-500;
+  }
+}
+
+/* ── Utility classes ──────────────────────────────────────────────────────── */
+
+@layer components {
+  /* Standard card surface — 0.5rem radius per spec, amber-tinted border, soft shadow */
+  .card {
+    @apply bg-navy-800 border border-slate-700/60 rounded-lg p-6;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Subtle inner panel */
+  .panel {
+    @apply bg-navy-700 border border-slate-700/40 rounded-lg p-4;
+  }
+
+  /* Primary action button — explicit amber hex values to guarantee correct rendering */
+  .btn-primary {
+    @apply font-semibold px-6 py-2.5 rounded-md
+           disabled:opacity-40 disabled:cursor-not-allowed
+           transition-colors duration-150 text-sm;
+    background-color: #F59E0B;
+    color: #1a1a2e;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #D97706;
+  }
+
+  /* Ghost / secondary button */
+  .btn-ghost {
+    @apply border border-slate-600 text-slate-300 font-medium px-4 py-2 rounded-md
+           hover:border-slate-400 hover:text-slate-100 disabled:opacity-40
+           transition-colors duration-150 text-sm;
+  }
+
+  /* Amber outline button — used for "New Analysis" in header */
+  .btn-outline-amber {
+    @apply border border-accent-blue text-accent-blue font-medium px-4 py-2 rounded-md
+           hover:bg-accent-blue hover:text-slate-900 disabled:opacity-40
+           transition-colors duration-150 text-sm;
+  }
+
+  /* Monospace value display */
+  .mono {
+    font-family: "JetBrains Mono", Consolas, monospace;
+  }
+
+  /* Sentiment badges — solid backgrounds, high-contrast text */
+  .badge {
+    @apply inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold mono;
+  }
+  .badge-positive {
+    @apply badge bg-emerald-600 text-white;
+  }
+  .badge-negative {
+    @apply badge bg-red-600 text-white;
+  }
+  .badge-neutral {
+    @apply badge text-white;
+    background-color: #64748B;  /* steel blue — visually distinct from amber brand color */
+  }
+
+  /* Form inputs — amber focus ring, consistent height */
+  .input {
+    @apply bg-navy-700 border border-slate-600 text-slate-100 rounded-md px-3 py-2.5
+           text-sm placeholder-slate-500 focus:outline-none focus:border-accent-blue
+           focus:ring-1 focus:ring-accent-blue/50 transition-colors duration-150 h-10;
+  }
+}
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 2s ease-in-out infinite;
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.35s ease-out forwards;
+}
+
+/* Spinner ring — 270° amber arc, rotates continuously */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner-ring {
+  /* All four sides defined here so inline style cannot override them */
+  border: 3px solid transparent;
+  border-top-color: #F59E0B;   /* visible arc ~270° */
+  border-right-color: #F59E0B;
+  border-bottom-color: #F59E0B;
+  /* border-left stays transparent → creates the ~90° gap */
+  animation: spin 0.8s linear infinite;
+}
