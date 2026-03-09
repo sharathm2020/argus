@@ -7,6 +7,10 @@ const EMPTY_ROW = () => ({ id: Date.now() + Math.random(), ticker: "", weight: "
  *
  * Renders a dynamic form for entering portfolio positions.
  * Validates weights in real time and calls onAnalyze(payload) on submit.
+ *
+ * Note: onAnalyze now returns quickly (fires a POST and transitions to
+ * loading state immediately). The component does not await the full
+ * analysis — App.jsx owns the loading / polling lifecycle.
  */
 export default function PortfolioInput({ onAnalyze }) {
   const [rows, setRows] = useState([EMPTY_ROW()]);
@@ -45,7 +49,7 @@ export default function PortfolioInput({ onAnalyze }) {
   }, []);
 
   const handleSubmit = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
       if (!canSubmit) return;
 
@@ -56,8 +60,10 @@ export default function PortfolioInput({ onAnalyze }) {
           weight: parseFloat(r.weight) / 100,
         })),
       };
-      await onAnalyze(payload);
-      setIsSubmitting(false);
+
+      // onAnalyze transitions App.jsx to LOADING state immediately,
+      // unmounting this component, so we don't await it.
+      onAnalyze(payload);
     },
     [rows, canSubmit, onAnalyze]
   );
@@ -88,7 +94,6 @@ export default function PortfolioInput({ onAnalyze }) {
             row.weight !== "" && (isNaN(weightNum) || weightNum <= 0 || weightNum > 100);
 
           return (
-            // "group" enables the CSS group-hover on the remove button
             <div
               key={row.id}
               className="grid grid-cols-[1fr_160px_28px] gap-3 items-center animate-fade-in-up group"
@@ -128,7 +133,7 @@ export default function PortfolioInput({ onAnalyze }) {
                 </span>
               </div>
 
-              {/* Remove row button — subtle, only fully visible on row hover */}
+              {/* Remove row button — subtle, only visible on row hover */}
               <button
                 type="button"
                 onClick={() => removeRow(row.id)}
@@ -205,7 +210,7 @@ export default function PortfolioInput({ onAnalyze }) {
         disabled={!canSubmit}
         className="btn-primary w-full py-3 text-base"
       >
-        {isSubmitting ? "Analyzing…" : "Analyze Portfolio"}
+        {isSubmitting ? "Submitting…" : "Analyze Portfolio"}
       </button>
     </form>
   );

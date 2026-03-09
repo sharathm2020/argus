@@ -6,6 +6,7 @@ using GPT-4o. News and filing data are pre-fetched before the agent runs,
 so no external calls happen inside the agent itself.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Tuple
 
@@ -18,8 +19,13 @@ from prompts.risk_narrative import (
     build_portfolio_summary_prompt,
     json_output_parser,
 )
+from job_store import job_store, JobStatus
 
 logger = logging.getLogger(__name__)
+
+# Maximum wall-clock seconds allowed for the full LLM analysis phase
+_AGENT_TIMEOUT_SECONDS = 180
+
 
 # ── LLM setup ────────────────────────────────────────────────────────────────
 
@@ -44,21 +50,12 @@ async def analyze_ticker(
     """
     Run the risk narrative LLM call for a single ticker.
 
-    Args:
-        ticker:          Ticker symbol.
-        weight:          Portfolio weight (0-1).
-        news_headlines:  Pre-fetched headlines list.
-        stock_info:      Dict with sector, market_cap, current_price, company_name.
-        risk_factors:    Pre-fetched 10-K Item 1A text.
-        llm:             Shared LLM instance.
-
-    Returns:
-        TickerRiskResult with all fields populated.
+    On LLM failure, returns a safe placeholder result so one bad ticker
+    never aborts the entire job.
     """
     sector = stock_info.get("sector", "Unknown")
     market_cap = stock_info.get("market_cap")
 
-    # Build prompt (all static vars pre-filled via .partial())
     prompt = build_ticker_prompt(
         ticker=ticker,
         weight=weight,
@@ -68,19 +65,19 @@ async def analyze_ticker(
         risk_factors=risk_factors,
     )
 
-    # Chain: prompt -> LLM -> JSON parser
     chain = prompt | llm | json_output_parser
 
     try:
         parsed: Dict[str, Any] = await chain.ainvoke({})
+        result_headlines = news_headlines
     except Exception as exc:
-        logger.error("LLM call failed for %s: %s", ticker, exc)
-        # Return a safe fallback so one bad ticker doesn't abort the whole run
+        logger.warning("LLM call failed for %s: %s", ticker, exc)
         parsed = {
-            "risk_summary": f"Risk analysis for {ticker} could not be completed at this time.",
-            "key_risks": ["Analysis unavailable"],
+            "risk_summary": "Analysis unavailable for this position.",
+            "key_risks": ["Data could not be retrieved"],
             "sentiment_score": 0.0,
         }
+        result_headlines = []  # don't surface partial data for a failed ticker
 
     # Clamp sentiment_score to valid range
     sentiment = float(parsed.get("sentiment_score", 0.0))
@@ -92,7 +89,7 @@ async def analyze_ticker(
         risk_summary=parsed.get("risk_summary", ""),
         key_risks=parsed.get("key_risks", []),
         sentiment_score=sentiment,
-        news_headlines=news_headlines,
+        news_headlines=result_headlines,
     )
 
 
@@ -104,15 +101,8 @@ async def generate_portfolio_summary(
 ) -> str:
     """
     Generate a portfolio-level risk summary by synthesizing individual results.
-
-    Args:
-        results: List of per-ticker TickerRiskResult objects.
-        llm:     Shared LLM instance.
-
-    Returns:
-        Plain text portfolio summary string.
+    Falls back to a placeholder on LLM failure.
     """
-    # Build a structured text block of position summaries
     position_lines: List[str] = []
     for r in results:
         position_lines.append(
@@ -143,47 +133,77 @@ async def run_portfolio_analysis(
     news_data: Dict[str, List[str]],
     stock_info: Dict[str, Dict[str, Any]],
     risk_factors: Dict[str, str],
+    job_id: str,
 ) -> PortfolioRiskResponse:
     """
-    Orchestrate the full portfolio risk analysis.
+    Orchestrate the full LLM analysis phase.
+
+    Emits job status updates throughout. Wrapped in a timeout guard and a
+    broad try/except — failures mark the job as FAILED rather than crashing
+    the server. Does not re-raise on error.
 
     Args:
         positions:    List of (ticker, weight) tuples.
         news_data:    Dict mapping ticker -> list of headline strings.
-        stock_info:   Dict mapping ticker -> yfinance fundamentals dict.
+        stock_info:   Dict mapping ticker -> fundamentals dict.
         risk_factors: Dict mapping ticker -> 10-K risk factors text.
-
-    Returns:
-        PortfolioRiskResponse with per-ticker results and portfolio summary.
+        job_id:       Job identifier for status updates.
     """
-    llm = _get_llm()
 
-    # Analyze all tickers concurrently using asyncio.gather (called from main.py)
-    import asyncio
+    async def _inner() -> PortfolioRiskResponse:
+        llm = _get_llm()
 
-    tasks = [
-        analyze_ticker(
-            ticker=ticker,
-            weight=weight,
-            news_headlines=news_data.get(ticker, []),
-            stock_info=stock_info.get(ticker, {}),
-            risk_factors=risk_factors.get(ticker, ""),
-            llm=llm,
+        # ── Phase 4: per-ticker LLM calls ────────────────────────────────
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Running AI risk analysis per position...")
+
+        tasks = [
+            analyze_ticker(
+                ticker=ticker,
+                weight=weight,
+                news_headlines=news_data.get(ticker, []),
+                stock_info=stock_info.get(ticker, {}),
+                risk_factors=risk_factors.get(ticker, ""),
+                llm=llm,
+            )
+            for ticker, weight in positions
+        ]
+
+        results: List[TickerRiskResult] = list(await asyncio.gather(*tasks))
+
+        # ── Phase 5: portfolio summary ────────────────────────────────────
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Synthesizing portfolio-level summary...")
+
+        portfolio_summary = await generate_portfolio_summary(results, llm)
+
+        # ── Compute weighted-average sentiment ────────────────────────────
+        overall_sentiment = sum(r.sentiment_score * r.weight for r in results)
+        overall_sentiment = max(-1.0, min(1.0, overall_sentiment))
+
+        response = PortfolioRiskResponse(
+            results=results,
+            portfolio_summary=portfolio_summary,
+            overall_sentiment=round(overall_sentiment, 4),
         )
-        for ticker, weight in positions
-    ]
 
-    results: List[TickerRiskResult] = list(await asyncio.gather(*tasks))
+        # ── Phase 6: mark complete ────────────────────────────────────────
+        job_store.update_job(
+            job_id,
+            JobStatus.COMPLETE,
+            "Analysis complete.",
+            results=response,
+        )
+        logger.info("Job %s complete — overall sentiment: %.3f", job_id, overall_sentiment)
+        return response
 
-    # Generate portfolio-level summary
-    portfolio_summary = await generate_portfolio_summary(results, llm)
+    # ── Timeout + error guard ─────────────────────────────────────────────
+    try:
+        return await asyncio.wait_for(_inner(), timeout=float(_AGENT_TIMEOUT_SECONDS))
 
-    # Compute weighted-average overall sentiment
-    overall_sentiment = sum(r.sentiment_score * r.weight for r in results)
-    overall_sentiment = max(-1.0, min(1.0, overall_sentiment))
+    except asyncio.TimeoutError:
+        msg = "Analysis timed out. Please try again with fewer tickers."
+        logger.error("Job %s timed out after %ds.", job_id, _AGENT_TIMEOUT_SECONDS)
+        job_store.update_job(job_id, JobStatus.FAILED, "", error=msg)
 
-    return PortfolioRiskResponse(
-        results=results,
-        portfolio_summary=portfolio_summary,
-        overall_sentiment=round(overall_sentiment, 4),
-    )
+    except Exception as exc:
+        logger.error("Job %s agent failed: %s", job_id, exc, exc_info=True)
+        job_store.update_job(job_id, JobStatus.FAILED, "", error=str(exc))

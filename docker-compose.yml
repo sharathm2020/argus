@@ -1,0 +1,33 @@
+services:
+
+  backend:
+    build:
+      # Build context is the project root so the Dockerfile can access requirements.txt
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: argus-backend
+    ports:
+      - "8000:8000"
+    # Load API keys from backend/.env (copy backend/.env.example → backend/.env first)
+    env_file:
+      - ./backend/.env
+    restart: unless-stopped
+    networks:
+      - argus-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: argus-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - argus-network
+
+networks:
+  argus-network:
+    driver: bridge

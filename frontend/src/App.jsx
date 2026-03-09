@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import PortfolioInput from "./components/PortfolioInput.jsx";
 import TickerCard from "./components/TickerCard.jsx";
 import RiskSummary from "./components/RiskSummary.jsx";
@@ -11,38 +11,17 @@ const STATE = {
   ERROR: "error",
 };
 
-// Messages that cycle during the loading state
-const LOADING_MESSAGES = [
-  "Fetching latest news and headlines...",
-  "Downloading SEC 10-K filings from EDGAR...",
-  "Extracting Risk Factors from filings...",
-  "Running AI risk analysis per position...",
-  "Synthesizing portfolio-level summary...",
-];
+// How often to poll the job status endpoint (ms)
+const POLL_INTERVAL_MS = 3000;
+
+// Stop polling and show error after this many consecutive network failures
+const MAX_NETWORK_FAILURES = 5;
 
 /**
- * Animated loading view with cycling status messages.
- * Each message is shown for ~8 seconds with a smooth fade transition.
- * This is purely a visual component — no application state is modified here.
+ * Animated loading view.
+ * Displays the real-time status_message coming from the backend poll response.
  */
-function LoadingView() {
-  const [msgIndex, setMsgIndex] = useState(0);
-  const [visible, setVisible] = useState(true);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Fade out
-      setVisible(false);
-      // After fade completes, advance to next message and fade in
-      setTimeout(() => {
-        setMsgIndex((i) => (i + 1) % LOADING_MESSAGES.length);
-        setVisible(true);
-      }, 500);
-    }, 8000);
-
-    return () => clearInterval(interval);
-  }, []);
-
+function LoadingView({ statusMessage }) {
   return (
     <div
       className="flex flex-col items-center justify-center gap-8 animate-fade-in-up"
@@ -54,25 +33,17 @@ function LoadingView() {
           className="absolute inset-0 rounded-full"
           style={{ border: "3px solid rgba(71,85,105,0.4)" }}
         />
-        <div
-          className="absolute inset-0 rounded-full spinner-ring"
-        />
+        <div className="absolute inset-0 rounded-full spinner-ring" />
       </div>
 
-      {/* Cycling status message */}
-      <div
-        className="text-center px-4"
-        style={{
-          opacity: visible ? 1 : 0,
-          transition: "opacity 0.5s ease",
-        }}
-      >
+      {/* Real-time status message from backend */}
+      <div className="text-center px-4">
         <p className="text-xl font-semibold text-slate-100 mb-2">
-          {LOADING_MESSAGES[msgIndex]}
+          {statusMessage || "Starting analysis..."}
         </p>
       </div>
 
-      {/* Static secondary note — always visible */}
+      {/* Static secondary note */}
       <p className="text-sm text-slate-500 text-center -mt-4">
         This may take 20–60 seconds for larger portfolios.
       </p>
@@ -81,19 +52,39 @@ function LoadingView() {
 }
 
 export default function App() {
-  const [appState, setAppState] = useState(STATE.IDLE);
+  const [appState, setAppState]       = useState(STATE.IDLE);
   const [analysisData, setAnalysisData] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
+
+  // Refs so interval callbacks always see fresh values without re-creating the interval
+  const pollIntervalRef    = useRef(null);
+  const networkFailuresRef = useRef(0);
+
+  // Clear the polling interval whenever we leave the loading state
+  function _clearPoll() {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }
 
   /**
-   * Called by PortfolioInput when the user submits a portfolio.
-   * Sends the request to the backend and transitions through loading -> results/error.
+   * Called by PortfolioInput on form submit.
+   * 1. POST /api/analyze  → get job_id (returns in <100ms)
+   * 2. Enter LOADING state immediately
+   * 3. Start polling GET /api/jobs/{job_id} every 3 seconds
    */
   async function handleAnalyze(portfolioPayload) {
+    _clearPoll();
+    networkFailuresRef.current = 0;
     setAppState(STATE.LOADING);
     setErrorMessage("");
     setAnalysisData(null);
+    setStatusMessage("");
 
+    // ── Step 1: submit job ────────────────────────────────────────────────
+    let jobId;
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -106,24 +97,73 @@ export default function App() {
         try {
           const errBody = await response.json();
           detail = errBody.detail || detail;
-        } catch (_) { /* ignore parse error */ }
+        } catch (_) { /* ignore */ }
         throw new Error(detail);
       }
 
       const data = await response.json();
-      setAnalysisData(data);
-      setAppState(STATE.RESULTS);
+      jobId = data.job_id;
     } catch (err) {
-      setErrorMessage(err.message || "An unexpected error occurred.");
+      setErrorMessage(err.message || "Failed to start analysis. Please try again.");
       setAppState(STATE.ERROR);
+      return;
     }
+
+    // ── Step 2: poll for results ──────────────────────────────────────────
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+
+        if (!res.ok) {
+          networkFailuresRef.current += 1;
+          if (networkFailuresRef.current >= MAX_NETWORK_FAILURES) {
+            _clearPoll();
+            setErrorMessage("Lost connection to server. Please try again.");
+            setAppState(STATE.ERROR);
+          }
+          return;
+        }
+
+        // Successful response — reset failure counter
+        networkFailuresRef.current = 0;
+        const job = await res.json();
+
+        // Update the displayed status message
+        if (job.status_message) {
+          setStatusMessage(job.status_message);
+        }
+
+        if (job.status === "complete") {
+          _clearPoll();
+          setAnalysisData(job.results);
+          setAppState(STATE.RESULTS);
+        } else if (job.status === "failed") {
+          _clearPoll();
+          setErrorMessage(job.error || "Analysis failed. Please try again.");
+          setAppState(STATE.ERROR);
+        }
+        // PENDING / PROCESSING → keep polling
+      } catch (_networkErr) {
+        networkFailuresRef.current += 1;
+        if (networkFailuresRef.current >= MAX_NETWORK_FAILURES) {
+          _clearPoll();
+          setErrorMessage("Lost connection to server. Please try again.");
+          setAppState(STATE.ERROR);
+        }
+      }
+    }, POLL_INTERVAL_MS);
   }
 
   function handleReset() {
+    _clearPoll();
     setAppState(STATE.IDLE);
     setAnalysisData(null);
     setErrorMessage("");
+    setStatusMessage("");
   }
+
+  // Clean up the interval if the component ever unmounts
+  useEffect(() => () => _clearPoll(), []);
 
   return (
     <div className="min-h-screen bg-navy-900 text-slate-100 flex flex-col">
@@ -165,10 +205,7 @@ export default function App() {
               >
                 Analyze Your Portfolio
               </h2>
-              <p
-                className="text-slate-400 leading-loose"
-                style={{ fontSize: "1rem" }}
-              >
+              <p className="text-slate-400 leading-loose" style={{ fontSize: "1rem" }}>
                 Enter your ticker symbols and allocation weights. Argus will fetch live news,
                 SEC 10-K filings, and generate an AI-powered risk assessment for each position.
               </p>
@@ -177,19 +214,31 @@ export default function App() {
           </div>
         )}
 
-        {/* Loading state */}
-        {appState === STATE.LOADING && <LoadingView />}
+        {/* Loading state — real-time status from backend */}
+        {appState === STATE.LOADING && <LoadingView statusMessage={statusMessage} />}
 
         {/* Error state */}
         {appState === STATE.ERROR && (
-          <div className="animate-fade-in-up max-w-2xl mx-auto">
-            <div className="card border-red-700/40 bg-red-950/20 mb-6">
-              <div className="flex items-start gap-3">
-                <span className="text-red-400 text-xl mt-0.5">✕</span>
-                <div>
-                  <h3 className="font-semibold text-red-300 mb-1">Analysis Failed</h3>
-                  <p className="text-sm text-red-400/80">{errorMessage}</p>
-                </div>
+          <div className="animate-fade-in-up max-w-[720px] mx-auto">
+            <div
+              className="rounded-lg p-5 mb-6 flex items-start gap-4"
+              style={{
+                background: "rgba(120,35,15,0.15)",
+                border: "1px solid rgba(245,158,11,0.25)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }}
+            >
+              {/* Amber warning icon */}
+              <span
+                className="text-2xl shrink-0 mt-0.5"
+                style={{ color: "#F59E0B" }}
+                aria-hidden="true"
+              >
+                ⚠
+              </span>
+              <div>
+                <h3 className="font-semibold text-slate-100 mb-1">Analysis Failed</h3>
+                <p className="text-sm text-slate-400">{errorMessage}</p>
               </div>
             </div>
             <button onClick={handleReset} className="btn-primary">
@@ -227,7 +276,7 @@ export default function App() {
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <footer className="border-t border-slate-700/40 mt-8 py-7">
         <div className="max-w-[1400px] mx-auto px-8 flex items-center justify-between text-xs text-slate-500">
-          <span className="mono">ARGUS v0.1.0</span>
+          <span className="mono">ARGUS v0.2.0</span>
           <span>For informational purposes only. Not financial advice.</span>
         </div>
       </footer>
