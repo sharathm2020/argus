@@ -83,6 +83,18 @@ async def analyze_ticker(
     sentiment = float(parsed.get("sentiment_score", 0.0))
     sentiment = max(-1.0, min(1.0, sentiment))
 
+    # Build a short excerpt from the raw 10-K risk factors text
+    edgar_excerpt: str | None = None
+    if risk_factors:
+        raw = risk_factors[:400]
+        # Try to truncate cleanly at the last sentence boundary within the limit
+        for punct in (".", "!", "?"):
+            last = raw.rfind(punct)
+            if last > 50:  # ensure we keep a meaningful chunk
+                raw = raw[: last + 1]
+                break
+        edgar_excerpt = raw.strip() or None
+
     return TickerRiskResult(
         ticker=ticker,
         weight=weight,
@@ -90,6 +102,7 @@ async def analyze_ticker(
         key_risks=parsed.get("key_risks", []),
         sentiment_score=sentiment,
         news_headlines=result_headlines,
+        edgar_excerpt=edgar_excerpt,
     )
 
 

@@ -37,6 +37,7 @@ function SentimentBadge({ score }) {
 export default function TickerCard({ result }) {
   const [newsExpanded, setNewsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [edgarExpanded, setEdgarExpanded] = useState(false);
 
   const {
     ticker,
@@ -45,6 +46,7 @@ export default function TickerCard({ result }) {
     key_risks,
     sentiment_score,
     news_headlines,
+    edgar_excerpt,
   } = result;
 
   const displayedHeadlines = newsExpanded ? news_headlines : news_headlines.slice(0, 2);
@@ -149,6 +151,74 @@ export default function TickerCard({ result }) {
           </div>
         ) : (
           <p className="text-xs text-slate-600 italic">No recent news available for this ticker.</p>
+        )}
+      </div>
+
+      {/* ── Sources ──────────────────────────────────────────────────────── */}
+      <div className="mt-5 pt-4" style={{ borderTop: "1px solid rgba(71,85,105,0.35)" }}>
+        {/* Source badge row */}
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <span className="text-xs text-slate-500 px-2 py-0.5 rounded-full border border-slate-700/50 bg-slate-800/50">
+            📰 News
+          </span>
+          <span
+            className="text-xs px-2 py-0.5 rounded-full border"
+            style={
+              edgar_excerpt
+                ? {
+                    color: "rgba(148,163,184,0.8)",
+                    borderColor: "rgba(71,85,105,0.5)",
+                    background: "rgba(30,41,59,0.5)",
+                  }
+                : {
+                    color: "rgba(100,116,139,0.5)",
+                    borderColor: "rgba(71,85,105,0.25)",
+                    background: "transparent",
+                    textDecoration: "line-through",
+                  }
+            }
+          >
+            📄 SEC 10-K
+          </span>
+          <span className="text-xs text-slate-500 px-2 py-0.5 rounded-full border border-slate-700/50 bg-slate-800/50">
+            📊 Fundamentals
+          </span>
+        </div>
+
+        {/* No 10-K notice */}
+        {!edgar_excerpt && (
+          <p className="text-xs text-slate-600 italic mb-2">
+            No 10-K filing found for this ticker.
+          </p>
+        )}
+
+        {/* Collapsible 10-K excerpt */}
+        {edgar_excerpt && (
+          <div>
+            <button
+              onClick={() => setEdgarExpanded((v) => !v)}
+              className="flex items-center gap-1.5 text-xs text-slate-400/70 hover:text-slate-300/90 transition-colors"
+            >
+              <span className="mono text-slate-500" style={{ fontSize: "0.6rem" }}>
+                {edgarExpanded ? "▼" : "▶"}
+              </span>
+              10-K Risk Factors
+            </button>
+
+            {edgarExpanded && (
+              <div
+                className="mt-2 p-3 rounded text-xs leading-relaxed"
+                style={{
+                  background: "rgba(2,8,20,0.7)",
+                  border: "1px solid rgba(51,65,85,0.5)",
+                  color: "rgba(148,163,184,0.75)",
+                  fontFamily: "monospace",
+                }}
+              >
+                {edgar_excerpt}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </article>
