@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 /**
  * Sentiment badge — same threshold logic as TickerCard, slightly larger for summary.
@@ -82,18 +82,25 @@ function SentimentGauge({ score }) {
  *   overallSentiment — overall_sentiment float from the API
  */
 export default function RiskSummary({ summary, overallSentiment }) {
+  const [isHovered, setIsHovered] = useState(false);
+
   return (
     <section
-      className="rounded-lg p-6 animate-fade-in-up"
+      className="rounded-lg p-6 animate-fade-in-up transition-all duration-200 ease-in-out"
       style={{
-        background: "#131e38",      // slightly lighter than navy-800 for visual separation
+        background: isHovered ? "rgba(40,60,100,0.95)" : "#131e38",
         borderTop: "4px solid #F59E0B",
-        borderRight: "1px solid rgba(71,85,105,0.5)",
-        borderBottom: "1px solid rgba(71,85,105,0.5)",
-        borderLeft: "1px solid rgba(71,85,105,0.5)",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+        borderRight: isHovered ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(71,85,105,0.5)",
+        borderBottom: isHovered ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(71,85,105,0.5)",
+        borderLeft: isHovered ? "1px solid rgba(255,255,255,0.25)" : "1px solid rgba(71,85,105,0.5)",
+        boxShadow: isHovered
+          ? "0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.15)"
+          : "0 1px 3px rgba(0,0,0,0.3)",
+        transform: isHovered ? "translateY(-2px)" : "translateY(0)",
       }}
       aria-label="Portfolio risk summary"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">

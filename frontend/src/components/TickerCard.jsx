@@ -36,6 +36,7 @@ function SentimentBadge({ score }) {
  */
 export default function TickerCard({ result }) {
   const [newsExpanded, setNewsExpanded] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   const {
     ticker,
@@ -50,12 +51,19 @@ export default function TickerCard({ result }) {
 
   return (
     <article
-      className="bg-navy-800 rounded-lg p-6 animate-fade-in-up flex flex-col"
+      className="rounded-lg p-6 animate-fade-in-up flex flex-col transition-all duration-200 ease-in-out"
       style={{
-        border: "1px solid rgba(71,85,105,0.6)",
-        /* inset box-shadow creates a reliable 4px left accent regardless of border-radius corner blending */
-        boxShadow: "inset 4px 0 0 0 #F59E0B, 0 1px 3px rgba(0,0,0,0.3)",
+        background: isHovered ? "rgba(40,60,100,0.95)" : "rgba(13,21,40,1)",
+        border: isHovered
+          ? "1px solid rgba(255,255,255,0.25)"
+          : "1px solid rgba(71,85,105,0.6)",
+        boxShadow: isHovered
+          ? "inset 4px 0 0 0 #F59E0B, 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.15)"
+          : "inset 4px 0 0 0 #F59E0B, 0 1px 3px rgba(0,0,0,0.3)",
+        transform: isHovered ? "translateY(-2px)" : "translateY(0)",
       }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
       {/* ── Card header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 mb-5">

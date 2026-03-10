@@ -198,18 +198,12 @@ export default function App() {
         {/* Idle — show input form */}
         {appState === STATE.IDLE && (
           <div className="animate-fade-in-up max-w-[720px] mx-auto">
-            <div className="mb-10">
-              <h2
-                className="font-bold text-slate-100 mb-3 leading-tight"
-                style={{ fontSize: "2.5rem" }}
-              >
-                Analyze Your Portfolio
-              </h2>
-              <p className="text-slate-400 leading-loose" style={{ fontSize: "1rem" }}>
-                Enter your ticker symbols and allocation weights. Argus will fetch live news,
-                SEC 10-K filings, and generate an AI-powered risk assessment for each position.
-              </p>
-            </div>
+            <h2
+              className="font-bold text-slate-100 leading-tight"
+              style={{ fontSize: "2.5rem" }}
+            >
+              Analyze Your Portfolio
+            </h2>
             <PortfolioInput onAnalyze={handleAnalyze} />
           </div>
         )}
