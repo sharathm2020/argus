@@ -8,15 +8,19 @@ Exposes:
 """
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
+from typing import List as _List
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from openai import AsyncOpenAI
 
 # Load environment variables before importing any module that reads them
 load_dotenv()
@@ -208,3 +212,131 @@ async def get_job(job_id: str) -> JobResult:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found or expired.")
     return job
+
+
+_PARSE_IMAGE_SYSTEM_PROMPT = (
+    "You are a financial data parser. The user will provide a screenshot of their "
+    "brokerage portfolio. Extract all stock/ETF/crypto tickers and their current dollar "
+    "values. Return ONLY a JSON array like: "
+    '[{"ticker": "AAPL", "value": 1500.00}, {"ticker": "GOOGL", "value": 800.00}] '
+    "Do not include any explanation or markdown. Only return the raw JSON array."
+)
+
+
+async def _parse_single_image(file: UploadFile, client: AsyncOpenAI) -> list[dict]:
+    """
+    Send one image to GPT-4o Vision and return its raw parsed holdings list.
+    Returns an empty list if the image cannot be parsed (so other images still succeed).
+    """
+    if file.content_type not in ("image/jpeg", "image/png"):
+        logger.warning("Skipping unsupported file type: %s", file.content_type)
+        return []
+
+    image_bytes = await file.read()
+    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    mime = file.content_type
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": _PARSE_IMAGE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime};base64,{b64_image}",
+                                "detail": "high",
+                            },
+                        }
+                    ],
+                },
+            ],
+            max_tokens=1024,
+            temperature=0,
+        )
+    except Exception as exc:
+        logger.error("GPT-4o Vision call failed for %s: %s", file.filename, exc)
+        return []
+
+    raw_text = response.choices[0].message.content or ""
+
+    try:
+        parsed: list[dict] = json.loads(raw_text)
+        if not isinstance(parsed, list):
+            raise ValueError("Response is not a JSON array")
+        validated = []
+        for item in parsed:
+            if "ticker" not in item or "value" not in item:
+                continue
+            float(item["value"])  # skip non-numeric values
+            validated.append(item)
+        return validated
+    except Exception as exc:
+        logger.warning("Unparseable GPT-4o response for %s: %s — raw: %s", file.filename, exc, raw_text[:200])
+        return []
+
+
+@app.post(
+    "/api/parse-portfolio-image",
+    tags=["analysis"],
+    summary="Parse one or more brokerage portfolio screenshots using GPT-4o Vision",
+)
+async def parse_portfolio_image(files: _List[UploadFile] = File(...)):
+    """
+    Accept one or more JPEG/PNG screenshots, extract tickers and values via GPT-4o
+    Vision (one call per image, run concurrently), deduplicate by ticker (taking the
+    MAX value seen across images for each ticker), then return normalised holdings
+    with percentage weights. Images are processed entirely in memory — never written
+    to disk.
+    """
+    if not files:
+        raise HTTPException(status_code=422, detail="No files uploaded.")
+
+    client = AsyncOpenAI()  # reads OPENAI_API_KEY from env
+
+    # Run all Vision calls concurrently
+    results_per_image: list[list[dict]] = await asyncio.gather(
+        *[_parse_single_image(f, client) for f in files]
+    )
+
+    # Flatten all holdings from all images
+    all_holdings: list[dict] = [item for batch in results_per_image for item in batch]
+
+    if not all_holdings:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract portfolio from image. Please try manual entry.",
+        )
+
+    # Deduplicate by ticker: keep MAX value seen (same holding across multiple screenshots)
+    deduped: dict[str, float] = {}
+    for item in all_holdings:
+        key = item["ticker"].strip().upper()
+        value = float(item["value"])
+        deduped[key] = max(deduped.get(key, 0.0), value)
+
+    total_value = sum(deduped.values())
+    if total_value <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract portfolio from image. Please try manual entry.",
+        )
+
+    holdings = [
+        {
+            "ticker": ticker,
+            "weight": round(value / total_value * 100, 4),
+        }
+        for ticker, value in deduped.items()
+    ]
+
+    logger.info(
+        "parse-portfolio-image: %d image(s) → %d deduplicated holdings, total_value=%.2f",
+        len(files),
+        len(holdings),
+        total_value,
+    )
+    return {"holdings": holdings, "total_value": round(total_value, 2)}

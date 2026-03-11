@@ -51,6 +51,11 @@ export default function TickerCard({ result }) {
 
   const displayedHeadlines = newsExpanded ? news_headlines : news_headlines.slice(0, 2);
 
+  const hasValidEdgarData = edgar_excerpt &&
+    !edgar_excerpt.toLowerCase().includes('unavailable') &&
+    !edgar_excerpt.toLowerCase().includes('error') &&
+    !edgar_excerpt.toLowerCase().includes('could not');
+
   return (
     <article
       className="rounded-lg p-6 animate-fade-in-up flex flex-col transition-all duration-200 ease-in-out"
@@ -164,7 +169,7 @@ export default function TickerCard({ result }) {
           <span
             className="text-xs px-2 py-0.5 rounded-full border"
             style={
-              edgar_excerpt
+              hasValidEdgarData
                 ? {
                     color: "rgba(148,163,184,0.8)",
                     borderColor: "rgba(71,85,105,0.5)",
@@ -186,14 +191,14 @@ export default function TickerCard({ result }) {
         </div>
 
         {/* No 10-K notice */}
-        {!edgar_excerpt && (
+        {!hasValidEdgarData && (
           <p className="text-xs text-slate-600 italic mb-2">
             No 10-K filing found for this ticker.
           </p>
         )}
 
         {/* Collapsible 10-K excerpt */}
-        {edgar_excerpt && (
+        {hasValidEdgarData && (
           <div>
             <button
               onClick={() => setEdgarExpanded((v) => !v)}
