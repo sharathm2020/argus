@@ -263,6 +263,14 @@ async def _parse_single_image(file: UploadFile, client: AsyncOpenAI) -> list[dic
 
     raw_text = response.choices[0].message.content or ""
 
+    # Strip markdown code fences if GPT-4o wraps the response
+    raw_text = raw_text.strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("```")[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
+
     try:
         parsed: list[dict] = json.loads(raw_text)
         if not isinstance(parsed, list):
