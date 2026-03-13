@@ -20,6 +20,7 @@ from prompts.risk_narrative import (
     json_output_parser,
 )
 from job_store import job_store, JobStatus
+from sentiment_analyzer import analyze_sentiment
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +76,30 @@ async def analyze_ticker(
         parsed = {
             "risk_summary": "Analysis unavailable for this position.",
             "key_risks": ["Data could not be retrieved"],
-            "sentiment_score": 0.0,
         }
         result_headlines = []  # don't surface partial data for a failed ticker
 
-    # Clamp sentiment_score to valid range
-    sentiment = float(parsed.get("sentiment_score", 0.0))
-    sentiment = max(-1.0, min(1.0, sentiment))
+    # ── Sentiment via DistilBERT (falls back to GPT-4o output on error) ───────
+    sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
+    confidence_score: float | None = None
+    try:
+        sentiment_result = analyze_sentiment(sentiment_text)
+        label = sentiment_result["label"]
+        confidence_score = sentiment_result["score"]
+        # Map categorical label → signed float in [-1, 1]
+        if label == "positive":
+            sentiment = confidence_score
+        elif label == "negative":
+            sentiment = -confidence_score
+        else:
+            sentiment = 0.0
+    except Exception as exc:
+        logger.warning(
+            "DistilBERT sentiment failed for %s (%s) — falling back to GPT-4o score.",
+            ticker, exc,
+        )
+        sentiment = float(parsed.get("sentiment_score", 0.0))
+        sentiment = max(-1.0, min(1.0, sentiment))
 
     # Build a short excerpt from the raw 10-K risk factors text
     edgar_excerpt: str | None = None
@@ -103,6 +121,7 @@ async def analyze_ticker(
         sentiment_score=sentiment,
         news_headlines=result_headlines,
         edgar_excerpt=edgar_excerpt,
+        confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
     )
 
 
