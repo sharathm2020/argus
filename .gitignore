@@ -36,3 +36,11 @@ logs/
 
 # SEC EDGAR temp downloads (in case any slip through)
 sec-edgar-filings/
+
+# Trained model files (large binary files, not committed to repo)
+backend/models/sentiment/*.bin
+backend/models/sentiment/*.safetensors
+backend/models/sentiment/pytorch_model*
+training/training_output/
+training/logs/
+training/__pycache__/
