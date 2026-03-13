@@ -1,0 +1,7 @@
+{
+  "final_accuracy": 0.9713,
+  "final_f1": 0.9714,
+  "num_epochs": 3,
+  "dataset_size": 2264,
+  "training_date": "2026-03-12"
+}
