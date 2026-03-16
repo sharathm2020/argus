@@ -52,7 +52,8 @@ class TickerRiskResult(BaseModel):
     key_risks: List[str]             # 3-5 short bullet-point strings
     sentiment_score: float           # -1.0 (most negative) to 1.0 (most positive)
     news_headlines: List[str]        # Raw headlines used in analysis
-    edgar_excerpt: Optional[str] = None  # Short excerpt from SEC 10-K risk factors
+    edgar_excerpt: Optional[str] = None   # Short excerpt from SEC 10-K risk factors
+    confidence_score: Optional[float] = None  # DistilBERT confidence (0–1)
 
 
 class PortfolioRiskResponse(BaseModel):
