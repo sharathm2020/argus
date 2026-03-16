@@ -6,7 +6,7 @@ import React, { useState } from "react";
  * score < -0.2 → red    "Negative"
  * otherwise    → amber  "Neutral"
  */
-function SentimentBadge({ score }) {
+function SentimentBadge({ score, confidenceScore }) {
   let className = "badge-neutral";
   let label = "Neutral";
 
@@ -18,9 +18,14 @@ function SentimentBadge({ score }) {
     label = "Negative";
   }
 
+  const detail =
+    confidenceScore != null
+      ? `${(confidenceScore * 100).toFixed(1)}%`
+      : `${score >= 0 ? "+" : ""}${score.toFixed(2)}`;
+
   return (
     <span className={className}>
-      {label} ({score >= 0 ? "+" : ""}{score.toFixed(2)})
+      {label} ({detail})
     </span>
   );
 }
@@ -45,6 +50,7 @@ export default function TickerCard({ result }) {
     risk_summary,
     key_risks,
     sentiment_score,
+    confidence_score,
     news_headlines,
     edgar_excerpt,
   } = result;
@@ -89,7 +95,7 @@ export default function TickerCard({ result }) {
         </div>
 
         {/* Sentiment badge — pushed to the right */}
-        <SentimentBadge score={sentiment_score} />
+        <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} />
       </div>
 
       {/* ── Risk summary ─────────────────────────────────────────────────── */}
