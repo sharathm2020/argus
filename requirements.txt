@@ -22,8 +22,9 @@ python-dotenv==1.0.1
 python-multipart==0.0.9
 
 # ── ML / Sentiment model ──────────────────────────────────────────────────────
-torch
-transformers
-accelerate
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.0+cpu
+transformers==4.40.0
+accelerate==0.29.0
 
 # ── Note: uuid and asyncio are Python stdlib — no install required ─────────────
