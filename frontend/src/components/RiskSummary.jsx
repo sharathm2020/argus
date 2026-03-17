@@ -81,7 +81,7 @@ function SentimentGauge({ score }) {
  *   summary          — portfolio_summary string from the API
  *   overallSentiment — overall_sentiment float from the API
  */
-export default function RiskSummary({ summary, overallSentiment }) {
+export default function RiskSummary({ summary, overallSentiment, sectorConcentration }) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -114,6 +114,44 @@ export default function RiskSummary({ summary, overallSentiment }) {
       <div className="mb-7">
         <SentimentGauge score={overallSentiment} />
       </div>
+
+      {/* ── Sector concentration ────────────────────────────────────────── */}
+      {sectorConcentration?.has_flags && (
+        <div className="mb-7">
+          {/* Sector pills */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {Object.entries(sectorConcentration.breakdown).map(([sector, weight]) => {
+              const flagged = weight >= 40;
+              return (
+                <span
+                  key={sector}
+                  className="text-xs font-medium px-2.5 py-1 rounded-full"
+                  style={
+                    flagged
+                      ? { background: "#F59E0B", color: "#0f172a" }
+                      : {
+                          background: "rgba(30,41,59,0.7)",
+                          color: "rgba(148,163,184,0.6)",
+                          border: "1px solid rgba(71,85,105,0.4)",
+                        }
+                  }
+                >
+                  {sector} {weight.toFixed(1)}%
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Concentration warnings */}
+          <div className="space-y-1">
+            {sectorConcentration.flags.map((flag) => (
+              <p key={flag.sector} className="text-xs" style={{ color: "#F59E0B" }}>
+                ⚠️ {flag.message}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Prose summary ───────────────────────────────────────────────── */}
       <p

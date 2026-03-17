@@ -174,6 +174,7 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
 
         return {
             "available": True,
+            "sector": sector if sector and sector != "Unknown" else "Unknown",
             "current_price": round(float(current_price), 2),
             "intrinsic_value": round(float(intrinsic_per_share), 2),
             "margin_of_safety": round(float(margin_of_safety), 1),
