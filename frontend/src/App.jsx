@@ -262,6 +262,7 @@ export default function App() {
             <RiskSummary
               summary={analysisData.portfolio_summary}
               overallSentiment={analysisData.overall_sentiment}
+              sectorConcentration={analysisData.sector_concentration}
             />
           </div>
         )}

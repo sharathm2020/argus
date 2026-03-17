@@ -60,5 +60,6 @@ class TickerRiskResult(BaseModel):
 class PortfolioRiskResponse(BaseModel):
     """Complete portfolio risk analysis response."""
     results: List[TickerRiskResult]
-    portfolio_summary: str           # Synthesized cross-portfolio narrative
-    overall_sentiment: float         # Weighted average of individual sentiment scores
+    portfolio_summary: str                        # Synthesized cross-portfolio narrative
+    overall_sentiment: float                      # Weighted average of individual sentiment scores
+    sector_concentration: Optional[dict] = None  # Sector breakdown + concentration flags
