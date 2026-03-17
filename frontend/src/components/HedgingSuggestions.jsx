@@ -27,6 +27,9 @@ export default function HedgingSuggestions({ hedgingSuggestions }) {
     portfolio_recommendations.length === 1 &&
     portfolio_recommendations[0].toLowerCase().includes("unable");
 
+  // Positive confirmation: data present, no error, no hedges needed
+  const isAllClear = !error && ticker_hedges.length === 0;
+
   return (
     <section
       className="rounded-lg p-6 animate-fade-in-up transition-all duration-200 ease-in-out"
@@ -58,6 +61,17 @@ export default function HedgingSuggestions({ hedgingSuggestions }) {
       {/* ── Unavailable state ───────────────────────────────────────────── */}
       {isUnavailable ? (
         <p className="text-sm text-slate-600 italic">Hedging analysis unavailable.</p>
+      ) : isAllClear ? (
+        /* ── All-clear positive state ────────────────────────────────────── */
+        <div className="py-2">
+          <p className="text-sm text-slate-300/90 mb-2">
+            ✅ No hedging action needed. Portfolio sentiment and valuations look healthy
+            across all positions.
+          </p>
+          <p className="text-xs text-slate-500 italic">
+            Argus will flag hedging opportunities when risk signals are detected.
+          </p>
+        </div>
       ) : (
         <>
           {/* ── Section 1: Per-ticker hedges ──────────────────────────── */}

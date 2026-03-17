@@ -24,8 +24,32 @@ function SentimentBadge({ score, confidenceScore }) {
       : `${score >= 0 ? "+" : ""}${score.toFixed(2)}`;
 
   return (
-    <span className={className}>
-      {label} ({detail})
+    <span className="relative group inline-block">
+      <span className={className}>
+        {label} ({detail})
+      </span>
+      {/* Tooltip */}
+      <span
+        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded text-xs text-white leading-snug opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal z-10"
+        style={{
+          background: "#1e293b",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          maxWidth: "220px",
+          width: "max-content",
+        }}
+        role="tooltip"
+      >
+        Confidence score from Argus&apos;s custom-trained DistilBERT financial sentiment model
+        {/* Downward arrow */}
+        <span
+          className="absolute left-1/2 -translate-x-1/2 top-full"
+          style={{
+            borderLeft: "5px solid transparent",
+            borderRight: "5px solid transparent",
+            borderTop: "5px solid #1e293b",
+          }}
+        />
+      </span>
     </span>
   );
 }
@@ -180,9 +204,13 @@ export default function TickerCard({ result }) {
         ))}
       </div>
 
+      {/* ── Tab content — key-based remount triggers CSS fade-in ─────────── */}
       {/* ── Risk Analysis tab ─────────────────────────────────────────────── */}
       {activeTab === "risk" && (
-        <>
+        <div
+          key="risk"
+          style={{ animation: "argus-fade-in 150ms ease-in-out" }}
+        >
           {/* Risk summary */}
           <p className="text-sm text-slate-300/90 leading-relaxed mb-5">
             {risk_summary}
@@ -317,12 +345,16 @@ export default function TickerCard({ result }) {
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
 
       {/* ── DCF Valuation tab ────────────────────────────────────────────── */}
       {activeTab === "dcf" && (
-        <div className="flex flex-col gap-4">
+        <div
+          key="dcf"
+          className="flex flex-col gap-4"
+          style={{ animation: "argus-fade-in 150ms ease-in-out" }}
+        >
           {!dcfAvailable ? (
             /* Unavailable state */
             <div

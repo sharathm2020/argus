@@ -23,6 +23,7 @@ from job_store import job_store, JobStatus
 from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf
 from tools.hedging import generate_hedging_suggestions
+from tools.portfolio_analysis import calculate_sector_concentration
 
 logger = logging.getLogger(__name__)
 
@@ -170,37 +171,6 @@ async def generate_portfolio_summary(
         )
 
     return summary.strip()
-
-
-# ── Sector concentration ──────────────────────────────────────────────────────
-
-def calculate_sector_concentration(results: List[TickerRiskResult]) -> Dict[str, Any]:
-    """
-    Group portfolio weights by sector and flag any sector >= 40%.
-
-    Sector is read from result.dcf_data["sector"] when DCF data is available;
-    tickers without DCF data (ETFs, crypto, etc.) contribute to "Unknown".
-    """
-    sector_weights: Dict[str, float] = {}
-    for r in results:
-        sector = "Unknown"
-        if r.dcf_data and r.dcf_data.get("available") and r.dcf_data.get("sector"):
-            sector = r.dcf_data["sector"]
-        sector_weights[sector] = sector_weights.get(sector, 0.0) + r.weight
-
-    breakdown = {s: round(w * 100, 1) for s, w in sector_weights.items()}
-
-    flags = [
-        {
-            "sector": s,
-            "weight": w,
-            "message": f"{w}% of your portfolio is concentrated in {s}",
-        }
-        for s, w in breakdown.items()
-        if w >= 40.0
-    ]
-
-    return {"breakdown": breakdown, "flags": flags, "has_flags": len(flags) > 0}
 
 
 # ── Main orchestrator ─────────────────────────────────────────────────────────
