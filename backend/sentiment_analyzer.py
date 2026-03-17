@@ -7,16 +7,18 @@ Subsequent calls reuse the loaded singleton — startup time is not affected.
 
 import logging
 import os
+from pathlib import Path
 from typing import Dict
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import hf_hub_download
+import shutil
 
 import torch
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
-_MODEL_DIR = os.path.join(os.path.dirname(__file__), "models", "sentiment")
+_MODEL_DIR = Path(__file__).parent / "models" / "sentiment"
 
 # Singleton holders — populated on first inference call
 _tokenizer = None
@@ -24,32 +26,51 @@ _model = None
 
 
 def _ensure_model_downloaded() -> None:
-    """Download the model from HuggingFace Hub if not already present locally."""
-    model_file = os.path.join(_MODEL_DIR, "model.safetensors")
-    if os.path.exists(model_file):
-        return  # already present, nothing to do
+    """Download model files individually from HuggingFace Hub if not already present."""
+    model_file = _MODEL_DIR / "model.safetensors"
+    if model_file.exists():
+        return
 
     logger.info("Downloading sentiment model from HuggingFace...")
-    try:
-        snapshot_download(
-            repo_id="sharathm20/argus-finbert",
-            local_dir=str(_MODEL_DIR),
-            local_dir_use_symlinks=False,
-            token=os.environ.get("HF_TOKEN"),
-            ignore_patterns=["*.gitkeep"],
-        )
-        logger.info("Model download complete.")
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to download sentiment model from HuggingFace Hub: {exc}. "
-            "Ensure HF_TOKEN is set and the repo 'sharathm20/argus-finbert' is accessible."
-        ) from exc
 
-    if not os.path.exists(os.path.join(_MODEL_DIR, "model.safetensors")):
+    token = os.environ.get("HF_TOKEN")
+    repo_id = "sharathm20/argus-finbert"
+
+    files_to_download = [
+        "model.safetensors",
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "training_args.bin",
+    ]
+
+    _MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+    for filename in files_to_download:
+        try:
+            cached_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=filename,
+                token=token,
+            )
+            dest = _MODEL_DIR / filename
+            shutil.copy2(cached_path, dest)
+            logger.info("Downloaded %s to %s", filename, dest)
+        except Exception as e:
+            if filename == "model.safetensors":
+                raise RuntimeError(
+                    f"Failed to download required file {filename}: {e}"
+                ) from e
+            else:
+                logger.warning("Could not download optional file %s: %s", filename, e)
+
+    if not model_file.exists():
         raise RuntimeError(
             f"Model download appeared to succeed but model.safetensors "
             f"not found at {_MODEL_DIR}"
         )
+
+    logger.info("Model download complete.")
 
 
 def _load_model() -> None:
@@ -67,8 +88,8 @@ def _load_model() -> None:
     )
 
     logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
-    _tokenizer = DistilBertTokenizer.from_pretrained(_MODEL_DIR)
-    _model = DistilBertForSequenceClassification.from_pretrained(_MODEL_DIR)
+    _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
+    _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
     _model.eval()
     logger.info("Sentiment model loaded successfully.")
 
