@@ -118,6 +118,12 @@
   animation: fade-in-up 0.35s ease-out forwards;
 }
 
+/* Tab content fade — used when switching between Risk/DCF tabs */
+@keyframes argus-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* Spinner ring — 270° amber arc, rotates continuously */
 @keyframes spin {
   to { transform: rotate(360deg); }
