@@ -42,7 +42,6 @@ def _ensure_model_downloaded() -> None:
         "tokenizer.json",
         "tokenizer_config.json",
         "training_args.bin",
-        "vocab.txt",
     ]
 
     _MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,7 +57,7 @@ def _ensure_model_downloaded() -> None:
             shutil.copy2(cached_path, dest)
             logger.info("Downloaded %s to %s", filename, dest)
         except Exception as e:
-            if filename in ("model.safetensors", "vocab.txt"):
+            if filename == "model.safetensors":
                 raise RuntimeError(
                     f"Failed to download required file {filename}: {e}"
                 ) from e
