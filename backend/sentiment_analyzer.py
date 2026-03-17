@@ -33,7 +33,8 @@ def _ensure_model_downloaded() -> None:
     try:
         snapshot_download(
             repo_id="sharathm20/argus-finbert",
-            local_dir=_MODEL_DIR,
+            local_dir=str(_MODEL_DIR),
+            local_dir_use_symlinks=False,
             token=os.environ.get("HF_TOKEN"),
             ignore_patterns=["*.gitkeep"],
         )
@@ -43,6 +44,12 @@ def _ensure_model_downloaded() -> None:
             f"Failed to download sentiment model from HuggingFace Hub: {exc}. "
             "Ensure HF_TOKEN is set and the repo 'sharathm20/argus-finbert' is accessible."
         ) from exc
+
+    if not os.path.exists(os.path.join(_MODEL_DIR, "model.safetensors")):
+        raise RuntimeError(
+            f"Model download appeared to succeed but model.safetensors "
+            f"not found at {_MODEL_DIR}"
+        )
 
 
 def _load_model() -> None:
