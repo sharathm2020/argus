@@ -21,6 +21,7 @@ from prompts.risk_narrative import (
 )
 from job_store import job_store, JobStatus
 from sentiment_analyzer import analyze_sentiment
+from tools.dcf import calculate_dcf
 
 logger = logging.getLogger(__name__)
 
@@ -68,16 +69,27 @@ async def analyze_ticker(
 
     chain = prompt | llm | json_output_parser
 
-    try:
-        parsed: Dict[str, Any] = await chain.ainvoke({})
-        result_headlines = news_headlines
-    except Exception as exc:
-        logger.warning("LLM call failed for %s: %s", ticker, exc)
-        parsed = {
+    # Run the LLM narrative chain and DCF calculation concurrently
+    llm_result, dcf_data = await asyncio.gather(
+        chain.ainvoke({}),
+        calculate_dcf(ticker),
+        return_exceptions=True,
+    )
+
+    if isinstance(llm_result, Exception):
+        logger.warning("LLM call failed for %s: %s", ticker, llm_result)
+        parsed: Dict[str, Any] = {
             "risk_summary": "Analysis unavailable for this position.",
             "key_risks": ["Data could not be retrieved"],
         }
         result_headlines = []  # don't surface partial data for a failed ticker
+    else:
+        parsed = llm_result
+        result_headlines = news_headlines
+
+    if isinstance(dcf_data, Exception):
+        logger.warning("DCF calculation failed for %s: %s", ticker, dcf_data)
+        dcf_data = {"available": False, "reason": "Calculation error"}
 
     # ── Sentiment via DistilBERT (falls back to GPT-4o output on error) ───────
     sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
@@ -122,6 +134,7 @@ async def analyze_ticker(
         news_headlines=result_headlines,
         edgar_excerpt=edgar_excerpt,
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
+        dcf_data=dcf_data,
     )
 
 
