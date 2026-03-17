@@ -127,10 +127,11 @@ def analyze_sentiment(text: str) -> Dict:
 
     inputs = _tokenizer(
         text,
-        max_length=128,
+        return_tensors="pt",
         truncation=True,
         padding=True,
-        return_tensors="pt",
+        max_length=128,
+        return_token_type_ids=False,
     )
 
     with torch.no_grad():
