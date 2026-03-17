@@ -5,7 +5,6 @@ The model is loaded from models/sentiment/ on the first call to analyze_sentimen
 Subsequent calls reuse the loaded singleton — startup time is not affected.
 """
 
-import asyncio
 import logging
 import os
 from pathlib import Path
@@ -24,14 +23,6 @@ _MODEL_DIR = Path(__file__).parent / "models" / "sentiment"
 # Singleton holders — populated on first inference call
 _tokenizer = None
 _model = None
-_load_lock: asyncio.Lock | None = None
-
-
-def _get_load_lock() -> asyncio.Lock:
-    global _load_lock
-    if _load_lock is None:
-        _load_lock = asyncio.Lock()
-    return _load_lock
 
 
 def _ensure_model_downloaded() -> None:
@@ -82,32 +73,36 @@ def _ensure_model_downloaded() -> None:
     logger.info("Model download complete.")
 
 
-async def _load_model() -> None:
+def _load_model() -> None:
     """Load the tokenizer and model into module-level singletons (once)."""
     global _tokenizer, _model
-    async with _get_load_lock():
-        if _model is not None:
-            return  # another thread loaded it while we waited
+    if _model is not None:
+        return  # already loaded
 
-        logger.info("_MODEL_DIR resolved to: %s (type: %s)", _MODEL_DIR, type(_MODEL_DIR))
-        logger.info("model.safetensors exists: %s", (_MODEL_DIR / "model.safetensors").exists())
+    logger.info("_MODEL_DIR resolved to: %s (type: %s)", _MODEL_DIR, type(_MODEL_DIR))
+    logger.info("model.safetensors exists: %s", (_MODEL_DIR / "model.safetensors").exists())
 
-        _ensure_model_downloaded()
+    _ensure_model_downloaded()
 
-        # Defer heavy imports so FastAPI startup is unaffected when model is absent
-        from transformers import (  # noqa: PLC0415
-            DistilBertForSequenceClassification,
-            DistilBertTokenizer,
-        )
+    # Defer heavy imports so FastAPI startup is unaffected when model is absent
+    from transformers import (  # noqa: PLC0415
+        DistilBertForSequenceClassification,
+        DistilBertTokenizer,
+    )
 
-        logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
-        _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
-        _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
-        _model.eval()
-        logger.info("Sentiment model loaded successfully.")
+    logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
+    _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
+    _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
+    _model.eval()
+    logger.info("Sentiment model loaded successfully.")
 
 
-async def analyze_sentiment(text: str) -> Dict:
+def preload_model() -> None:
+    """Call at application startup to load model before requests arrive."""
+    _load_model()
+
+
+def analyze_sentiment(text: str) -> Dict:
     """
     Run financial sentiment inference on a single text string.
 
@@ -128,7 +123,7 @@ async def analyze_sentiment(text: str) -> Dict:
     Raises:
         RuntimeError: If the model directory is missing or empty.
     """
-    await _load_model()
+    _load_model()
 
     inputs = _tokenizer(
         text,

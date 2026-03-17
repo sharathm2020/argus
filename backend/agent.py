@@ -97,7 +97,7 @@ async def analyze_ticker(
     sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
     confidence_score: float | None = None
     try:
-        sentiment_result = await analyze_sentiment(sentiment_text)
+        sentiment_result = analyze_sentiment(sentiment_text)
         label = sentiment_result["label"]
         confidence_score = sentiment_result["score"]
         # Map categorical label → signed float in [-1, 1]

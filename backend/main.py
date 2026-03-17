@@ -62,6 +62,10 @@ def _build_allowed_origins() -> list[str]:
 async def lifespan(app: FastAPI):
     logger.info("Argus backend starting up…")
 
+    from sentiment_analyzer import preload_model
+    await asyncio.to_thread(preload_model)
+    logger.info("Sentiment model preloaded and ready.")
+
     # Background task: purge expired jobs every 10 minutes
     async def _cleanup_loop() -> None:
         while True:
