@@ -82,6 +82,9 @@ def _load_model() -> None:
         if _model is not None:
             return  # another thread loaded it while we waited
 
+        logger.info("_MODEL_DIR resolved to: %s (type: %s)", _MODEL_DIR, type(_MODEL_DIR))
+        logger.info("model.safetensors exists: %s", (_MODEL_DIR / "model.safetensors").exists())
+
         _ensure_model_downloaded()
 
         # Defer heavy imports so FastAPI startup is unaffected when model is absent
