@@ -98,7 +98,7 @@ Architecture diagram coming in Phase 4.
 ## Roadmap
 
 - **Phase 1** ✅ — Core pipeline: portfolio input, EDGAR + news fetching, GPT-4o risk analysis, results UI
-- **Phase 2** 🔄 — Historical analysis, portfolio comparison, exportable PDF reports
+- **Phase 2** ✅ — Historical analysis, portfolio comparison, exportable PDF reports
 - **Phase 3** 🔜 — User accounts, saved portfolios, alerting on risk threshold changes
 - **Phase 4** 🔜 — Real-time data feeds, WebSocket streaming, multi-model support
 
