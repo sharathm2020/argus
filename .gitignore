@@ -44,3 +44,4 @@ backend/models/sentiment/pytorch_model*
 training/training_output/
 training/logs/
 training/__pycache__/
+backend/upload_model.py
