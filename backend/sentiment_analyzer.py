@@ -5,10 +5,10 @@ The model is loaded from models/sentiment/ on the first call to analyze_sentimen
 Subsequent calls reuse the loaded singleton — startup time is not affected.
 """
 
+import asyncio
 import logging
 import os
 from pathlib import Path
-import threading
 from typing import Dict
 
 from huggingface_hub import hf_hub_download
@@ -24,7 +24,14 @@ _MODEL_DIR = Path(__file__).parent / "models" / "sentiment"
 # Singleton holders — populated on first inference call
 _tokenizer = None
 _model = None
-_load_lock = threading.Lock()
+_load_lock: asyncio.Lock | None = None
+
+
+def _get_load_lock() -> asyncio.Lock:
+    global _load_lock
+    if _load_lock is None:
+        _load_lock = asyncio.Lock()
+    return _load_lock
 
 
 def _ensure_model_downloaded() -> None:
@@ -75,10 +82,10 @@ def _ensure_model_downloaded() -> None:
     logger.info("Model download complete.")
 
 
-def _load_model() -> None:
+async def _load_model() -> None:
     """Load the tokenizer and model into module-level singletons (once)."""
     global _tokenizer, _model
-    with _load_lock:
+    async with _get_load_lock():
         if _model is not None:
             return  # another thread loaded it while we waited
 
@@ -100,7 +107,7 @@ def _load_model() -> None:
         logger.info("Sentiment model loaded successfully.")
 
 
-def analyze_sentiment(text: str) -> Dict:
+async def analyze_sentiment(text: str) -> Dict:
     """
     Run financial sentiment inference on a single text string.
 
@@ -121,7 +128,7 @@ def analyze_sentiment(text: str) -> Dict:
     Raises:
         RuntimeError: If the model directory is missing or empty.
     """
-    _load_model()
+    await _load_model()
 
     inputs = _tokenizer(
         text,
