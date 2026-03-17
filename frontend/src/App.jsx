@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import PortfolioInput from "./components/PortfolioInput.jsx";
 import TickerCard from "./components/TickerCard.jsx";
 import RiskSummary from "./components/RiskSummary.jsx";
+import HedgingSuggestions from "./components/HedgingSuggestions.jsx";
 
 // Application state machine states
 const STATE = {
@@ -264,6 +265,7 @@ export default function App() {
               overallSentiment={analysisData.overall_sentiment}
               sectorConcentration={analysisData.sector_concentration}
             />
+            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} />
           </div>
         )}
       </main>

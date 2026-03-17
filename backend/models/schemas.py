@@ -63,3 +63,4 @@ class PortfolioRiskResponse(BaseModel):
     portfolio_summary: str                        # Synthesized cross-portfolio narrative
     overall_sentiment: float                      # Weighted average of individual sentiment scores
     sector_concentration: Optional[dict] = None  # Sector breakdown + concentration flags
+    hedging_suggestions: Optional[dict] = None   # GPT-4o hedging recommendations
