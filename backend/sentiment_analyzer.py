@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Dict
 
+from huggingface_hub import snapshot_download
+
 import torch
 import torch.nn.functional as F
 
@@ -21,26 +23,41 @@ _tokenizer = None
 _model = None
 
 
+def _ensure_model_downloaded() -> None:
+    """Download the model from HuggingFace Hub if not already present locally."""
+    model_file = os.path.join(_MODEL_DIR, "model.safetensors")
+    if os.path.exists(model_file):
+        return  # already present, nothing to do
+
+    logger.info("Downloading sentiment model from HuggingFace...")
+    try:
+        snapshot_download(
+            repo_id="sharathm20/argus-finbert",
+            local_dir=_MODEL_DIR,
+            token=os.environ.get("HF_TOKEN"),
+            ignore_patterns=["*.gitkeep"],
+        )
+        logger.info("Model download complete.")
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to download sentiment model from HuggingFace Hub: {exc}. "
+            "Ensure HF_TOKEN is set and the repo 'sharathm20/argus-finbert' is accessible."
+        ) from exc
+
+
 def _load_model() -> None:
     """Load the tokenizer and model into module-level singletons (once)."""
     global _tokenizer, _model
     if _model is not None:
         return  # already loaded
 
+    _ensure_model_downloaded()
+
     # Defer heavy imports so FastAPI startup is unaffected when model is absent
     from transformers import (  # noqa: PLC0415
         DistilBertForSequenceClassification,
         DistilBertTokenizer,
     )
-
-    if not os.path.isdir(_MODEL_DIR) or not any(
-        f for f in os.listdir(_MODEL_DIR) if not f.startswith(".")
-    ):
-        raise RuntimeError(
-            f"No trained model found at '{_MODEL_DIR}'. "
-            "Run 'python train.py' from the training/ directory first, "
-            "then re-start the backend."
-        )
 
     logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
     _tokenizer = DistilBertTokenizer.from_pretrained(_MODEL_DIR)
