@@ -8,6 +8,7 @@ Subsequent calls reuse the loaded singleton — startup time is not affected.
 import logging
 import os
 from pathlib import Path
+import threading
 from typing import Dict
 
 from huggingface_hub import hf_hub_download
@@ -23,6 +24,7 @@ _MODEL_DIR = Path(__file__).parent / "models" / "sentiment"
 # Singleton holders — populated on first inference call
 _tokenizer = None
 _model = None
+_load_lock = threading.Lock()
 
 
 def _ensure_model_downloaded() -> None:
@@ -76,22 +78,23 @@ def _ensure_model_downloaded() -> None:
 def _load_model() -> None:
     """Load the tokenizer and model into module-level singletons (once)."""
     global _tokenizer, _model
-    if _model is not None:
-        return  # already loaded
+    with _load_lock:
+        if _model is not None:
+            return  # another thread loaded it while we waited
 
-    _ensure_model_downloaded()
+        _ensure_model_downloaded()
 
-    # Defer heavy imports so FastAPI startup is unaffected when model is absent
-    from transformers import (  # noqa: PLC0415
-        DistilBertForSequenceClassification,
-        DistilBertTokenizer,
-    )
+        # Defer heavy imports so FastAPI startup is unaffected when model is absent
+        from transformers import (  # noqa: PLC0415
+            DistilBertForSequenceClassification,
+            DistilBertTokenizer,
+        )
 
-    logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
-    _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
-    _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
-    _model.eval()
-    logger.info("Sentiment model loaded successfully.")
+        logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
+        _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
+        _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
+        _model.eval()
+        logger.info("Sentiment model loaded successfully.")
 
 
 def analyze_sentiment(text: str) -> Dict:
