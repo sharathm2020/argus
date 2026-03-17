@@ -22,6 +22,7 @@ from prompts.risk_narrative import (
 from job_store import job_store, JobStatus
 from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf
+from tools.hedging import generate_hedging_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -258,11 +259,20 @@ async def run_portfolio_analysis(
         # ── Sector concentration ──────────────────────────────────────────
         sector_concentration = calculate_sector_concentration(results)
 
+        # ── Phase 5b: hedging suggestions (sequential — depends on all results) ──
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...")
+        hedging_suggestions = await generate_hedging_suggestions(
+            ticker_results=results,
+            sector_concentration=sector_concentration,
+            overall_sentiment=overall_sentiment,
+        )
+
         response = PortfolioRiskResponse(
             results=results,
             portfolio_summary=portfolio_summary,
             overall_sentiment=round(overall_sentiment, 4),
             sector_concentration=sector_concentration,
+            hedging_suggestions=hedging_suggestions,
         )
 
         # ── Phase 6: mark complete ────────────────────────────────────────
