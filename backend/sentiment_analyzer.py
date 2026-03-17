@@ -42,6 +42,7 @@ def _ensure_model_downloaded() -> None:
         "tokenizer.json",
         "tokenizer_config.json",
         "training_args.bin",
+        "vocab.txt",
     ]
 
     _MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,7 +58,7 @@ def _ensure_model_downloaded() -> None:
             shutil.copy2(cached_path, dest)
             logger.info("Downloaded %s to %s", filename, dest)
         except Exception as e:
-            if filename == "model.safetensors":
+            if filename in ("model.safetensors", "vocab.txt"):
                 raise RuntimeError(
                     f"Failed to download required file {filename}: {e}"
                 ) from e
@@ -86,12 +87,12 @@ def _load_model() -> None:
 
     # Defer heavy imports so FastAPI startup is unaffected when model is absent
     from transformers import (  # noqa: PLC0415
+        AutoTokenizer,
         DistilBertForSequenceClassification,
-        DistilBertTokenizer,
     )
 
     logger.info("Loading DistilBERT sentiment model from %s", _MODEL_DIR)
-    _tokenizer = DistilBertTokenizer.from_pretrained(str(_MODEL_DIR))
+    _tokenizer = AutoTokenizer.from_pretrained(str(_MODEL_DIR))
     _model = DistilBertForSequenceClassification.from_pretrained(str(_MODEL_DIR))
     _model.eval()
     logger.info("Sentiment model loaded successfully.")
