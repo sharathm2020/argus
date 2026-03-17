@@ -21,4 +21,9 @@ pydantic==2.9.2
 python-dotenv==1.0.1
 python-multipart==0.0.9
 
+# ── ML / Sentiment model ──────────────────────────────────────────────────────
+torch
+transformers
+accelerate
+
 # ── Note: uuid and asyncio are Python stdlib — no install required ─────────────

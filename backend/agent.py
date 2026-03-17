@@ -20,6 +20,10 @@ from prompts.risk_narrative import (
     json_output_parser,
 )
 from job_store import job_store, JobStatus
+from sentiment_analyzer import analyze_sentiment
+from tools.dcf import calculate_dcf
+from tools.hedging import generate_hedging_suggestions
+from tools.portfolio_analysis import calculate_sector_concentration
 
 logger = logging.getLogger(__name__)
 
@@ -67,21 +71,49 @@ async def analyze_ticker(
 
     chain = prompt | llm | json_output_parser
 
-    try:
-        parsed: Dict[str, Any] = await chain.ainvoke({})
-        result_headlines = news_headlines
-    except Exception as exc:
-        logger.warning("LLM call failed for %s: %s", ticker, exc)
-        parsed = {
+    # Run the LLM narrative chain and DCF calculation concurrently
+    llm_result, dcf_data = await asyncio.gather(
+        chain.ainvoke({}),
+        calculate_dcf(ticker),
+        return_exceptions=True,
+    )
+
+    if isinstance(llm_result, Exception):
+        logger.warning("LLM call failed for %s: %s", ticker, llm_result)
+        parsed: Dict[str, Any] = {
             "risk_summary": "Analysis unavailable for this position.",
             "key_risks": ["Data could not be retrieved"],
-            "sentiment_score": 0.0,
         }
         result_headlines = []  # don't surface partial data for a failed ticker
+    else:
+        parsed = llm_result
+        result_headlines = news_headlines
 
-    # Clamp sentiment_score to valid range
-    sentiment = float(parsed.get("sentiment_score", 0.0))
-    sentiment = max(-1.0, min(1.0, sentiment))
+    if isinstance(dcf_data, Exception):
+        logger.warning("DCF calculation failed for %s: %s", ticker, dcf_data)
+        dcf_data = {"available": False, "reason": "Calculation error"}
+
+    # ── Sentiment via DistilBERT (falls back to GPT-4o output on error) ───────
+    sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
+    confidence_score: float | None = None
+    try:
+        sentiment_result = analyze_sentiment(sentiment_text)
+        label = sentiment_result["label"]
+        confidence_score = sentiment_result["score"]
+        # Map categorical label → signed float in [-1, 1]
+        if label == "positive":
+            sentiment = confidence_score
+        elif label == "negative":
+            sentiment = -confidence_score
+        else:
+            sentiment = 0.0
+    except Exception as exc:
+        logger.warning(
+            "DistilBERT sentiment failed for %s (%s) — falling back to GPT-4o score.",
+            ticker, exc,
+        )
+        sentiment = float(parsed.get("sentiment_score", 0.0))
+        sentiment = max(-1.0, min(1.0, sentiment))
 
     # Build a short excerpt from the raw 10-K risk factors text
     edgar_excerpt: str | None = None
@@ -103,6 +135,8 @@ async def analyze_ticker(
         sentiment_score=sentiment,
         news_headlines=result_headlines,
         edgar_excerpt=edgar_excerpt,
+        confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
+        dcf_data=dcf_data,
     )
 
 
@@ -192,10 +226,23 @@ async def run_portfolio_analysis(
         overall_sentiment = sum(r.sentiment_score * r.weight for r in results)
         overall_sentiment = max(-1.0, min(1.0, overall_sentiment))
 
+        # ── Sector concentration ──────────────────────────────────────────
+        sector_concentration = calculate_sector_concentration(results)
+
+        # ── Phase 5b: hedging suggestions (sequential — depends on all results) ──
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...")
+        hedging_suggestions = await generate_hedging_suggestions(
+            ticker_results=results,
+            sector_concentration=sector_concentration,
+            overall_sentiment=overall_sentiment,
+        )
+
         response = PortfolioRiskResponse(
             results=results,
             portfolio_summary=portfolio_summary,
             overall_sentiment=round(overall_sentiment, 4),
+            sector_concentration=sector_concentration,
+            hedging_suggestions=hedging_suggestions,
         )
 
         # ── Phase 6: mark complete ────────────────────────────────────────

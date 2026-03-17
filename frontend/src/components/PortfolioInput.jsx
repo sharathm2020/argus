@@ -58,9 +58,9 @@ function ManualEntry({ onAnalyze }) {
       style={{ border: "1px solid rgba(245,158,11,0.20)", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }}
     >
       {/* Column headers */}
-      <div className="grid grid-cols-[1fr_160px_28px] gap-3 items-center text-xs text-slate-500/70 mono uppercase tracking-wider px-1">
-        <span>Ticker</span>
-        <span>Weight</span>
+      <div className="flex gap-2 w-full items-center text-xs text-slate-500/70 mono uppercase tracking-wider px-1">
+        <span className="flex-1 min-w-0">Ticker</span>
+        <span className="w-24 min-w-0 flex-shrink-0">Weight</span>
         <span />
       </div>
 
@@ -71,10 +71,10 @@ function ManualEntry({ onAnalyze }) {
           const weightInvalid =
             row.weight !== "" && (isNaN(weightNum) || weightNum <= 0 || weightNum > 100);
           return (
-            <div key={row.id} className="grid grid-cols-[1fr_160px_28px] gap-3 items-center animate-fade-in-up group">
+            <div key={row.id} className="flex gap-2 w-full items-center animate-fade-in-up group">
               <input
                 type="text"
-                className="input mono uppercase"
+                className="input mono uppercase flex-1 min-w-0"
                 placeholder="e.g. AAPL"
                 value={row.ticker}
                 maxLength={5}
@@ -84,7 +84,7 @@ function ManualEntry({ onAnalyze }) {
               />
               <input
                 type="number"
-                className={`input mono text-right w-full ${
+                className={`input mono text-right w-24 min-w-0 flex-shrink-0 ${
                   weightInvalid ? "border-red-500 focus:border-red-400 focus:ring-red-500/30" : ""
                 }`}
                 placeholder="e.g. 30"

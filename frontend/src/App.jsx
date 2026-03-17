@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import PortfolioInput from "./components/PortfolioInput.jsx";
 import TickerCard from "./components/TickerCard.jsx";
 import RiskSummary from "./components/RiskSummary.jsx";
+import HedgingSuggestions from "./components/HedgingSuggestions.jsx";
 
 // Application state machine states
 const STATE = {
@@ -262,7 +263,9 @@ export default function App() {
             <RiskSummary
               summary={analysisData.portfolio_summary}
               overallSentiment={analysisData.overall_sentiment}
+              sectorConcentration={analysisData.sector_concentration}
             />
+            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} />
           </div>
         )}
       </main>
@@ -270,7 +273,7 @@ export default function App() {
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <footer className="border-t border-slate-700/40 mt-8 py-7">
         <div className="max-w-[1400px] mx-auto px-8 flex items-center justify-between text-xs text-slate-500">
-          <span className="mono">ARGUS v0.2.0</span>
+          <span className="mono">ARGUS v0.3.0</span>
           <span>For informational purposes only. Not financial advice.</span>
         </div>
       </footer>

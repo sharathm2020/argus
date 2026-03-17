@@ -76,6 +76,49 @@ concise portfolio-level narrative. Respond with plain prose only — no JSON, \
 no markdown, no bullet points.\
 """
 
+# ── Hedging prompt ────────────────────────────────────────────────────────────
+
+HEDGING_SYSTEM_PROMPT = """\
+You are a portfolio risk advisor specializing in hedging strategies. \
+Your job is to review a portfolio's risk signals and suggest targeted hedges. \
+You always respond with valid JSON only — no markdown fences, no commentary outside the JSON object.\
+"""
+
+HEDGING_USER_TEMPLATE = """\
+Review the following portfolio risk data and generate hedging suggestions.
+
+Portfolio Overview:
+{portfolio_context}
+
+Instructions:
+- For Section 1 (ticker_hedges): only include tickers where sentiment is \
+"negative" OR DCF verdict is "Overvalued". Skip all neutral/positive tickers \
+with no DCF concern. For each included ticker, suggest ONE specific hedge instrument. \
+Prefer inverse ETFs for broad market exposure (SH for S&P short, PSQ for QQQ short, \
+SQQQ for aggressive tech short), sector safe havens (XLP for consumer staples, GLD for \
+macro uncertainty, TLT for rate risk), or put options as a general concept (not specific strikes).
+
+- For Section 2 (portfolio_recommendations): write 2-3 bullet points addressing the \
+overall picture. Address sector concentration if flagged. Address overall sentiment direction. \
+Suggest a cash allocation percentage only if overall sentiment is strongly negative (below -0.4). \
+Keep each bullet to one concise sentence.
+
+Respond ONLY in this exact JSON format with no markdown fences and no text outside the JSON:
+{{
+  "ticker_hedges": [
+    {{
+      "ticker": "TICKER",
+      "hedge_instrument": "Instrument name",
+      "explanation": "One sentence explaining why this hedge fits this position"
+    }}
+  ],
+  "portfolio_recommendations": [
+    "Bullet point one",
+    "Bullet point two"
+  ]
+}}\
+"""
+
 # ── Output parser ─────────────────────────────────────────────────────────────
 
 # LangChain JSON parser — strips markdown fences and validates JSON structure

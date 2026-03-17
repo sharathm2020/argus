@@ -52,11 +52,15 @@ class TickerRiskResult(BaseModel):
     key_risks: List[str]             # 3-5 short bullet-point strings
     sentiment_score: float           # -1.0 (most negative) to 1.0 (most positive)
     news_headlines: List[str]        # Raw headlines used in analysis
-    edgar_excerpt: Optional[str] = None  # Short excerpt from SEC 10-K risk factors
+    edgar_excerpt: Optional[str] = None        # Short excerpt from SEC 10-K risk factors
+    confidence_score: Optional[float] = None  # DistilBERT confidence (0–1)
+    dcf_data: Optional[dict] = None           # DCF intrinsic value breakdown
 
 
 class PortfolioRiskResponse(BaseModel):
     """Complete portfolio risk analysis response."""
     results: List[TickerRiskResult]
-    portfolio_summary: str           # Synthesized cross-portfolio narrative
-    overall_sentiment: float         # Weighted average of individual sentiment scores
+    portfolio_summary: str                        # Synthesized cross-portfolio narrative
+    overall_sentiment: float                      # Weighted average of individual sentiment scores
+    sector_concentration: Optional[dict] = None  # Sector breakdown + concentration flags
+    hedging_suggestions: Optional[dict] = None   # GPT-4o hedging recommendations
