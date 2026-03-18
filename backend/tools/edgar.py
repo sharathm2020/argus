@@ -223,3 +223,70 @@ def fetch_risk_factors_batch(tickers: list[str]) -> Dict[str, str]:
                 )
 
     return result
+
+
+_EDGAR_CLEAN_PROMPT = """\
+You are given raw text extracted from an SEC 10-K filing's Item 1A (Risk Factors) section.
+The text may begin with forward-looking statement disclaimers, table-of-contents summaries, \
+or introductory meta-commentary before the actual risk factors begin.
+
+Your task:
+1. Remove any preamble that describes WHERE the risks are or contains forward-looking statement \
+disclaimers ("forward-looking statements", "safe harbor", "we undertake no obligation", etc.).
+2. Start the output at the first substantive risk factor — typically a bold heading or a sentence \
+that begins describing an actual business risk (e.g. "We face intense competition...", \
+"Our revenue depends on...", etc.).
+3. Do NOT summarize or paraphrase. Return the original text verbatim from that point onward.
+4. If the text is already clean (starts directly with risk content), return it unchanged.
+5. Return only the cleaned text — no commentary, no labels, no markdown.
+
+Raw text:
+{raw_text}"""
+
+
+async def _clean_edgar_excerpt(raw_text: str, ticker: str) -> str:
+    """Use GPT-4o mini to strip forward-looking preamble from extracted 10-K text."""
+    from openai import AsyncOpenAI  # noqa: PLC0415
+
+    client = AsyncOpenAI()
+    prompt = _EDGAR_CLEAN_PROMPT.format(raw_text=raw_text[:6000])
+
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=600,
+            temperature=0,
+        )
+        cleaned = (response.choices[0].message.content or "").strip()
+        return cleaned if cleaned else raw_text
+    except Exception as exc:
+        logger.warning(
+            "GPT-4o mini EDGAR cleaning failed for %s: %s — using raw text", ticker, exc
+        )
+        return raw_text
+
+
+async def clean_risk_factors_batch(raw_results: Dict[str, str]) -> Dict[str, str]:
+    """
+    Run GPT-4o mini preamble cleaning concurrently over all successfully fetched tickers.
+
+    Tickers whose text contains 'unavailable' are passed through unchanged.
+    """
+    import asyncio  # noqa: PLC0415
+
+    tasks = {
+        ticker: _clean_edgar_excerpt(text, ticker)
+        for ticker, text in raw_results.items()
+        if text and "unavailable" not in text.lower()
+    }
+
+    cleaned_texts = await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+    result = dict(raw_results)
+    for ticker, clean_text in zip(tasks.keys(), cleaned_texts):
+        if isinstance(clean_text, str):
+            result[ticker] = clean_text
+        # on exception, leave the original raw text in place
+
+    return result
