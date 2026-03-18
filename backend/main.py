@@ -28,7 +28,7 @@ load_dotenv()
 from agent import run_portfolio_analysis
 from job_store import JobResult, JobStatus, job_store
 from models.schemas import PortfolioRequest
-from tools.edgar import fetch_risk_factors_batch
+from tools.edgar import clean_risk_factors_batch, fetch_risk_factors_batch
 from tools.news import fetch_news_batch, fetch_stock_info_batch
 from tools.portfolio import parse_portfolio
 
@@ -134,6 +134,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> No
         job_store.update_job(job_id, JobStatus.PROCESSING, "Downloading SEC 10-K filings from EDGAR...")
 
         risk_factors = await asyncio.to_thread(fetch_risk_factors_batch, tickers)
+        risk_factors = await clean_risk_factors_batch(risk_factors)
 
         # ── Phase 3: signal extraction complete — hand off to agent ─────────
         job_store.update_job(job_id, JobStatus.PROCESSING, "Extracting risk factors from filings...")
