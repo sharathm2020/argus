@@ -2,15 +2,20 @@ import React, { useState } from "react";
 
 /**
  * Sentiment badge component.
- * score > 0.2  → green  "Positive"
- * score < -0.2 → red    "Negative"
- * otherwise    → amber  "Neutral"
+ * label="mixed"  → purple "Mixed"
+ * score > 0.2    → green  "Positive"
+ * score < -0.2   → red    "Negative"
+ * otherwise      → amber  "Neutral"
  */
-function SentimentBadge({ score, confidenceScore }) {
+function SentimentBadge({ score, confidenceScore, label: sentimentLabel }) {
+  const isMixed = sentimentLabel === "mixed";
+
   let className = "badge-neutral";
   let label = "Neutral";
 
-  if (score > 0.2) {
+  if (isMixed) {
+    label = "Mixed";
+  } else if (score > 0.2) {
     className = "badge-positive";
     label = "Positive";
   } else if (score < -0.2) {
@@ -25,7 +30,10 @@ function SentimentBadge({ score, confidenceScore }) {
 
   return (
     <span className="relative group inline-block">
-      <span className={className}>
+      <span
+        className={className}
+        style={isMixed ? { backgroundColor: "#7C3AED", color: "white" } : undefined}
+      >
         {label} ({detail})
       </span>
       {/* Tooltip */}
@@ -167,7 +175,7 @@ export default function TickerCard({ result }) {
         </div>
 
         {/* Sentiment badge — pushed to the right */}
-        <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} />
+        <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} label={result.sentiment_label} />
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
