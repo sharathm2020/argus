@@ -133,7 +133,14 @@ export default function TickerCard({ result }) {
     news_headlines,
     edgar_excerpt,
     dcf_data,
+    asset_type,
   } = result;
+
+  const assetTypeBadge = asset_type === "crypto"
+    ? { label: "Crypto",  style: { color: "#F59E0B", borderColor: "rgba(245,158,11,0.4)",  background: "rgba(245,158,11,0.08)"  } }
+    : asset_type === "etf"
+    ? { label: "ETF",     style: { color: "#60A5FA", borderColor: "rgba(96,165,250,0.4)",  background: "rgba(96,165,250,0.08)"  } }
+    : { label: "Equity",  style: { color: "#94A3B8", borderColor: "rgba(148,163,184,0.3)", background: "rgba(148,163,184,0.06)" } };
 
   const displayedHeadlines = newsExpanded ? news_headlines : news_headlines.slice(0, 2);
 
@@ -174,6 +181,13 @@ export default function TickerCard({ result }) {
           {/* Weight pill */}
           <span className="mono text-xs text-slate-400/70 bg-slate-700/50 border border-slate-600/40 rounded-full px-2.5 py-0.5 shrink-0">
             {(weight * 100).toFixed(1)}%
+          </span>
+          {/* Asset type badge */}
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0"
+            style={assetTypeBadge.style}
+          >
+            {assetTypeBadge.label}
           </span>
         </div>
 

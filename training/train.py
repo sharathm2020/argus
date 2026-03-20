@@ -1,5 +1,5 @@
 """
-train.py — Fine-tune DistilBERT on financial_phrasebank for sentiment classification.
+train.py — Fine-tune DistilBERT on combined 4-class dataset for sentiment classification.
 Run from inside the training/ directory: python train.py
 """
 
@@ -8,7 +8,7 @@ import os
 from datetime import date
 
 import numpy as np
-from datasets import load_dataset
+import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 from transformers import (
@@ -48,30 +48,40 @@ class FinancialSentimentDataset(Dataset):
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
-    acc = accuracy_score(labels, predictions)
-    f1 = f1_score(labels, predictions, average="weighted")
-    return {"accuracy": acc, "f1": f1}
+    preds = np.argmax(logits, axis=-1)
+    acc = accuracy_score(labels, preds)
+    f1 = f1_score(labels, preds, average="weighted")
+    per_class_f1 = f1_score(labels, preds, average=None)
+    result = {
+        "accuracy": acc,
+        "f1": f1,
+        "f1_negative": per_class_f1[0],
+        "f1_neutral": per_class_f1[1],
+        "f1_positive": per_class_f1[2],
+        "f1_mixed": per_class_f1[3],
+    }
+    return result
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+LABEL_NAMES = {0: "negative", 1: "neutral", 2: "positive", 3: "mixed"}
+
+
 def main():
     # --- Load dataset ---
-    print("Loading financial_phrasebank dataset...")
-    raw = load_dataset("financial_phrasebank", "sentences_allagree", trust_remote_code=True)
-    # The dataset only has a "train" split
-    all_sentences = raw["train"]["sentence"]
-    all_labels = raw["train"]["label"]
+    print("Loading combined dataset from data/combined_dataset.csv...")
+    df = pd.read_csv("data/combined_dataset.csv")
+    all_sentences = df["sentence"].tolist()
+    all_labels = df["label"].tolist()
 
     total = len(all_sentences)
     print(f"Total samples: {total}")
-    label_names = {0: "negative", 1: "neutral", 2: "positive"}
-    for lbl_id, lbl_name in label_names.items():
+    for lbl_id, lbl_name in LABEL_NAMES.items():
         count = all_labels.count(lbl_id)
-        print(f"  {lbl_name}: {count} ({count / total * 100:.1f}%)")
+        print(f"  {lbl_name} ({lbl_id}): {count} ({count / total * 100:.1f}%)")
 
     # --- Train / validation split ---
     train_sentences, val_sentences, train_labels, val_labels = train_test_split(
@@ -97,15 +107,15 @@ def main():
     print("\nLoading DistilBERT model...")
     model = DistilBertForSequenceClassification.from_pretrained(
         "distilbert-base-uncased",
-        num_labels=3,
-        id2label={0: "negative", 1: "neutral", 2: "positive"},
-        label2id={"negative": 0, "neutral": 1, "positive": 2},
+        num_labels=4,
+        id2label={0: "negative", 1: "neutral", 2: "positive", 3: "mixed"},
+        label2id={"negative": 0, "neutral": 1, "positive": 2, "mixed": 3},
     )
 
     # --- Training arguments ---
     training_args = TrainingArguments(
         output_dir="./training_output",
-        num_train_epochs=3,
+        num_train_epochs=5,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         warmup_steps=100,
@@ -115,7 +125,8 @@ def main():
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
+        metric_for_best_model="eval_f1",
+        greater_is_better=True,
         fp16=False,
         report_to="none",
     )
@@ -137,8 +148,16 @@ def main():
     metrics = trainer.evaluate()
     final_accuracy = metrics.get("eval_accuracy", 0.0)
     final_f1 = metrics.get("eval_f1", 0.0)
-    print(f"Final accuracy: {final_accuracy:.4f}")
+    f1_negative = metrics.get("eval_f1_negative", 0.0)
+    f1_neutral = metrics.get("eval_f1_neutral", 0.0)
+    f1_positive = metrics.get("eval_f1_positive", 0.0)
+    f1_mixed = metrics.get("eval_f1_mixed", 0.0)
+    print(f"Final accuracy:      {final_accuracy:.4f}")
     print(f"Final F1 (weighted): {final_f1:.4f}")
+    print(f"  f1_negative: {f1_negative:.4f}")
+    print(f"  f1_neutral:  {f1_neutral:.4f}")
+    print(f"  f1_positive: {f1_positive:.4f}")
+    print(f"  f1_mixed:    {f1_mixed:.4f}")
 
     # --- Save model ---
     save_path = "../backend/models/sentiment"
@@ -151,7 +170,12 @@ def main():
     results = {
         "final_accuracy": round(final_accuracy, 4),
         "final_f1": round(final_f1, 4),
+        "f1_negative": round(f1_negative, 4),
+        "f1_neutral": round(f1_neutral, 4),
+        "f1_positive": round(f1_positive, 4),
+        "f1_mixed": round(f1_mixed, 4),
         "num_epochs": int(training_args.num_train_epochs),
+        "num_classes": 4,
         "dataset_size": total,
         "training_date": date.today().isoformat(),
     }

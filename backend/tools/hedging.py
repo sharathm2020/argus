@@ -48,10 +48,11 @@ def _build_portfolio_context(
         if r.dcf_data and r.dcf_data.get("available"):
             dcf_verdict = r.dcf_data.get("verdict", "N/A")
 
+        asset_type = getattr(r, "asset_type", "equity") or "equity"
         lines.append(
             f"  {r.ticker}: weight={r.weight * 100:.1f}%, "
             f"sentiment={sentiment_label} (confidence={confidence}), "
-            f"DCF={dcf_verdict}"
+            f"DCF={dcf_verdict}, asset_type={asset_type}"
         )
 
     context = "Positions:\n" + "\n".join(lines)

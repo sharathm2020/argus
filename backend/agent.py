@@ -25,6 +25,8 @@ from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf
 from tools.hedging import generate_hedging_suggestions
 from tools.portfolio_analysis import calculate_sector_concentration
+from utils.asset_classifier import classify_ticker
+from data.coingecko_client import get_crypto_data
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,13 @@ async def analyze_ticker(
     sector = stock_info.get("sector", "Unknown")
     market_cap = stock_info.get("market_cap")
 
+    # Classify asset type; for crypto, fetch CoinGecko data for market cap
+    asset_type = classify_ticker(ticker, stock_info)
+    if asset_type == "crypto":
+        crypto_raw = await asyncio.to_thread(get_crypto_data, ticker)
+        if crypto_raw.get("market_cap"):
+            market_cap = crypto_raw["market_cap"]
+
     prompt = build_ticker_prompt(
         ticker=ticker,
         weight=weight,
@@ -75,17 +84,27 @@ async def analyze_ticker(
         market_cap=market_cap,
         news_headlines=news_headlines,
         risk_factors=risk_factors,
+        asset_type=asset_type,
     )
 
     ticker_llm = _get_llm(temperature=0.2, model=model)
     chain = prompt | ticker_llm | json_output_parser
 
-    # Run the LLM narrative chain and DCF calculation concurrently
-    llm_result, dcf_data = await asyncio.gather(
-        chain.ainvoke({}),
-        calculate_dcf(ticker),
-        return_exceptions=True,
-    )
+    # Run LLM + DCF concurrently for equities; skip DCF for crypto/ETF
+    if asset_type == "equity":
+        llm_result, dcf_data = await asyncio.gather(
+            chain.ainvoke({}),
+            calculate_dcf(ticker),
+            return_exceptions=True,
+        )
+    else:
+        llm_result = await chain.ainvoke({})
+        reason = (
+            "DCF analysis is not applicable to cryptocurrency assets."
+            if asset_type == "crypto"
+            else "DCF analysis is not applicable to ETF positions."
+        )
+        dcf_data = {"available": False, "reason": reason}
 
     if isinstance(llm_result, Exception):
         logger.warning("LLM call failed for %s: %s", ticker, llm_result)
@@ -160,6 +179,7 @@ async def analyze_ticker(
         edgar_excerpt=edgar_excerpt,
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
         dcf_data=dcf_data,
+        asset_type=asset_type,
     )
 
 
