@@ -23,7 +23,7 @@ from job_store import job_store, JobStatus
 from db.supabase_client import write_sentiment_history
 from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf, fetch_risk_free_rate
-from tools.hedging import generate_hedging_suggestions
+from tools.hedging import generate_hedging_suggestions, generate_options_hedge
 from tools.portfolio_analysis import calculate_sector_concentration
 from utils.asset_classifier import classify_ticker
 from data.coingecko_client import get_crypto_data
@@ -71,13 +71,16 @@ async def analyze_ticker(
     """
     sector = stock_info.get("sector", "Unknown")
     market_cap = stock_info.get("market_cap")
+    current_price: float | None = stock_info.get("current_price")
 
-    # Classify asset type; for crypto, fetch CoinGecko data for market cap
+    # Classify asset type; for crypto, fetch CoinGecko data for market cap + price
     asset_type = classify_ticker(ticker, stock_info)
     if asset_type == "crypto":
         crypto_raw = await asyncio.to_thread(get_crypto_data, ticker)
         if crypto_raw.get("market_cap"):
             market_cap = crypto_raw["market_cap"]
+        if crypto_raw.get("price"):
+            current_price = crypto_raw["price"]
 
     prompt = build_ticker_prompt(
         ticker=ticker,
@@ -166,6 +169,33 @@ async def analyze_ticker(
     except Exception as exc:
         logger.warning("Supabase sentiment_history write failed for %s: %s", ticker, exc)
 
+    # ── Options-based hedge recommendation ───────────────────────────────────
+    # Refine current_price from DCF data if available (more accurate than FMP profile)
+    if (
+        asset_type == "equity"
+        and isinstance(dcf_data, dict)
+        and dcf_data.get("available")
+        and dcf_data.get("current_price")
+    ):
+        current_price = dcf_data["current_price"]
+
+    dcf_mos: float | None = None
+    if isinstance(dcf_data, dict) and dcf_data.get("available"):
+        dcf_mos = dcf_data.get("margin_of_safety")
+
+    try:
+        options_hedge = await generate_options_hedge(
+            ticker=ticker,
+            current_price=current_price,
+            asset_type=asset_type,
+            sentiment_label=sentiment_label,
+            confidence=confidence_score,
+            dcf_margin_of_safety=dcf_mos,
+        )
+    except Exception as exc:
+        logger.warning("Options hedge failed for %s: %s", ticker, exc)
+        options_hedge = None
+
     # Build a short excerpt from the raw 10-K risk factors text
     edgar_excerpt: str | None = None
     if risk_factors:
@@ -189,7 +219,9 @@ async def analyze_ticker(
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
         dcf_data=dcf_data,
         asset_type=asset_type,
+        industry=stock_info.get("industry") or "",
         comps_data=comps_data,
+        options_hedge=options_hedge,
     )
 
 

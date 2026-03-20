@@ -5,6 +5,7 @@ DistilBERT sentiment signals (label + confidence) drive which tickers are
 flagged for per-position hedging. GPT-4o generates the actual suggestion text.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -14,6 +15,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from prompts.risk_narrative import HEDGING_SYSTEM_PROMPT, HEDGING_USER_TEMPLATE
+from prompts.options_narrative import OPTIONS_SYSTEM_PROMPT, build_options_prompt
+from data.options_client import fetch_options_chain, filter_put_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,58 @@ def _strip_fences(text: str) -> str:
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
     return text.strip()
+
+
+async def generate_options_hedge(
+    ticker: str,
+    current_price: Optional[float],
+    asset_type: str,
+    sentiment_label: Optional[str],
+    confidence: Optional[float],
+    dcf_margin_of_safety: Optional[float],
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch real put contracts for *ticker* and use GPT-4o to recommend
+    the most appropriate protective hedge.
+
+    Returns:
+        A dict with recommendation fields, or {"skip": True, "reason": ...}
+        if GPT-4o judges the signals too mild.
+        Returns None on any failure so options data never breaks the main response.
+    """
+    if current_price is None or current_price <= 0:
+        return None
+    try:
+        contracts = await asyncio.to_thread(fetch_options_chain, ticker)
+        if not contracts:
+            return None
+
+        candidates = filter_put_candidates(contracts, current_price)
+        if not candidates:
+            return None
+
+        user_prompt = build_options_prompt(
+            ticker=ticker,
+            asset_type=asset_type,
+            sentiment_label=sentiment_label,
+            confidence=confidence,
+            dcf_margin_of_safety=dcf_margin_of_safety,
+            put_candidates=candidates,
+        )
+
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.2, max_tokens=400)
+        response = await llm.ainvoke([
+            SystemMessage(content=OPTIONS_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ])
+
+        raw = _strip_fences(response.content)
+        parsed = json.loads(raw)
+        return parsed
+
+    except Exception as exc:
+        logger.warning("Options hedge generation failed for %s: %s", ticker, exc)
+        return None
 
 
 async def generate_hedging_suggestions(

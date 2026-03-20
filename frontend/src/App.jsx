@@ -265,7 +265,7 @@ export default function App() {
               overallSentiment={analysisData.overall_sentiment}
               sectorConcentration={analysisData.sector_concentration}
             />
-            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} />
+            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} results={analysisData.results} />
           </div>
         )}
       </main>
