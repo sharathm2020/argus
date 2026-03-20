@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import SentimentTrendModal from "./SentimentTrendModal";
 
 /**
  * Sentiment badge component.
@@ -120,6 +121,7 @@ export default function TickerCard({ result }) {
   const [isHovered, setIsHovered] = useState(false);
   const [edgarExpanded, setEdgarExpanded] = useState(false);
   const [dcfInputsExpanded, setDcfInputsExpanded] = useState(false);
+  const [showTrendModal, setShowTrendModal] = useState(false);
 
   const {
     ticker,
@@ -143,6 +145,7 @@ export default function TickerCard({ result }) {
   const dcfAvailable = dcf_data && dcf_data.available;
 
   return (
+    <>
     <article
       className="rounded-lg p-6 animate-fade-in-up flex flex-col transition-all duration-200 ease-in-out"
       style={{
@@ -174,8 +177,19 @@ export default function TickerCard({ result }) {
           </span>
         </div>
 
-        {/* Sentiment badge — pushed to the right */}
-        <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} label={result.sentiment_label} />
+        {/* Sentiment badge + trend link — pushed to the right */}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} label={result.sentiment_label} />
+          <button
+            onClick={() => setShowTrendModal(true)}
+            className="text-xs font-medium transition-colors"
+            style={{ color: "#F59E0B" }}
+            onMouseEnter={(e) => (e.target.style.color = "#FCD34D")}
+            onMouseLeave={(e) => (e.target.style.color = "#F59E0B")}
+          >
+            View Trend →
+          </button>
+        </div>
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
@@ -444,5 +458,14 @@ export default function TickerCard({ result }) {
         </div>
       )}
     </article>
+
+    {/* Sentiment trend modal — rendered outside the article so it isn't clipped */}
+    {showTrendModal && (
+      <SentimentTrendModal
+        ticker={ticker}
+        onClose={() => setShowTrendModal(false)}
+      />
+    )}
+  </>
   );
 }

@@ -20,6 +20,7 @@ from prompts.risk_narrative import (
     json_output_parser,
 )
 from job_store import job_store, JobStatus
+from db.supabase_client import write_sentiment_history
 from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf
 from tools.hedging import generate_hedging_suggestions
@@ -104,9 +105,11 @@ async def analyze_ticker(
     # ── Sentiment via DistilBERT (falls back to GPT-4o output on error) ───────
     sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
     confidence_score: float | None = None
+    sentiment_label: str | None = None
     try:
         sentiment_result = analyze_sentiment(sentiment_text)
         label = sentiment_result["label"]
+        sentiment_label = label
         confidence_score = sentiment_result["score"]
         # Map categorical label → signed float in [-1, 1]
         if label == "positive":
@@ -122,6 +125,18 @@ async def analyze_ticker(
         )
         sentiment = float(parsed.get("sentiment_score", 0.0))
         sentiment = max(-1.0, min(1.0, sentiment))
+
+    # ── Persist sentiment to Supabase (non-blocking, never breaks analysis) ──
+    try:
+        await asyncio.to_thread(
+            write_sentiment_history,
+            ticker,
+            sentiment_label,
+            confidence_score,
+            sentiment,
+        )
+    except Exception as exc:
+        logger.warning("Supabase sentiment_history write failed for %s: %s", ticker, exc)
 
     # Build a short excerpt from the raw 10-K risk factors text
     edgar_excerpt: str | None = None
