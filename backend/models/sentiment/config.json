@@ -13,10 +13,12 @@
   "id2label": {
     "0": "negative",
     "1": "neutral",
-    "2": "positive"
+    "2": "positive",
+    "3": "mixed"
   },
   "initializer_range": 0.02,
   "label2id": {
+    "mixed": 3,
     "negative": 0,
     "neutral": 1,
     "positive": 2

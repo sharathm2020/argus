@@ -4,8 +4,8 @@ Run from inside the training/ directory: python evaluate.py
 """
 
 import numpy as np
+import pandas as pd
 import torch
-from datasets import load_dataset
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
 from transformers import (
@@ -28,15 +28,17 @@ EXAMPLE_SENTENCES = [
     "The acquisition is expected to be accretive to earnings",
     "Cash flow from operations was largely unchanged",
     "Debt levels have risen to concerning levels",
+    "Revenue grew 12% but margins compressed significantly due to rising input costs",
+    "Strong earnings beat expectations yet the CEO's resignation introduced uncertainty",
 ]
 
 
 def load_validation_data():
-    """Load financial_phrasebank and return the 20% validation split."""
-    print("Loading financial_phrasebank dataset...")
-    raw = load_dataset("financial_phrasebank", "sentences_allagree")
-    all_sentences = raw["train"]["sentence"]
-    all_labels = raw["train"]["label"]
+    """Load combined_dataset.csv and return the 20% validation split."""
+    print("Loading combined dataset from data/combined_dataset.csv...")
+    df = pd.read_csv("data/combined_dataset.csv")
+    all_sentences = df["sentence"].tolist()
+    all_labels = df["label"].tolist()
 
     _, val_sentences, _, val_labels = train_test_split(
         all_sentences, all_labels, test_size=0.2, random_state=42, stratify=all_labels
@@ -80,7 +82,7 @@ def main():
 
     predictions = run_batch_inference(model, tokenizer, list(val_sentences), device)
 
-    label_names = ["negative", "neutral", "positive"]
+    label_names = ["negative", "neutral", "positive", "mixed"]
     print("\n--- Classification Report ---")
     print(
         classification_report(val_labels, predictions, target_names=label_names)

@@ -116,6 +116,7 @@ def fetch_stock_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 "sector": profile.get("sector", "Unknown"),
                 "market_cap": profile.get("mktCap"),
                 "company_name": profile.get("companyName", ticker),
+                "is_etf": profile.get("isEtf", False) is True,
             }
             time.sleep(0.2)
 
@@ -126,6 +127,7 @@ def fetch_stock_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
                 "sector": "Unknown",
                 "market_cap": None,
                 "company_name": ticker,
+                "is_etf": False,
             }
 
     return result
