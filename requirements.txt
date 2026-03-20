@@ -28,4 +28,7 @@ transformers==4.40.0
 accelerate==0.29.0
 huggingface_hub==0.23.0
 
+# ── Database ──────────────────────────────────────────────────────────────────
+supabase
+
 # ── Note: uuid and asyncio are Python stdlib — no install required ─────────────
