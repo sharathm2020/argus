@@ -3,10 +3,16 @@ Portfolio validation and parsing utilities.
 Extracts a clean list of (ticker, weight) pairs from a PortfolioRequest.
 """
 
+import logging
 import re
 from typing import List, Tuple
 
 from models.schemas import PortfolioRequest
+
+logger = logging.getLogger(__name__)
+
+_MAX_TICKERS = 50
+_LARGE_PORTFOLIO_THRESHOLD = 20
 
 
 def parse_portfolio(request: PortfolioRequest) -> List[Tuple[str, float]]:
@@ -19,6 +25,12 @@ def parse_portfolio(request: PortfolioRequest) -> List[Tuple[str, float]]:
     """
     if not request.portfolio:
         raise ValueError("Portfolio is empty. Please provide at least one ticker.")
+
+    if len(request.portfolio) > _MAX_TICKERS:
+        raise ValueError(
+            f"Portfolio exceeds maximum of {_MAX_TICKERS} tickers. "
+            "Please reduce your portfolio size."
+        )
 
     seen_tickers = set()
     parsed: List[Tuple[str, float]] = []
@@ -49,6 +61,12 @@ def parse_portfolio(request: PortfolioRequest) -> List[Tuple[str, float]]:
     if abs(total_weight - 1.0) > 0.01:
         raise ValueError(
             f"Portfolio weights sum to {total_weight:.4f}, but must sum to 1.0 (±0.01)."
+        )
+
+    if len(parsed) > _LARGE_PORTFOLIO_THRESHOLD:
+        logger.warning(
+            "Large portfolio detected: %d tickers. Analysis will use chunked processing.",
+            len(parsed),
         )
 
     return parsed
