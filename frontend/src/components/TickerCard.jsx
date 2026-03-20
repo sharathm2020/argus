@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import SentimentTrendModal from "./SentimentTrendModal";
+import CompsView from "./CompsView";
 
 /**
  * Sentiment badge component.
@@ -134,7 +135,10 @@ export default function TickerCard({ result }) {
     edgar_excerpt,
     dcf_data,
     asset_type,
+    comps_data,
   } = result;
+
+  const showCompsTab = asset_type === "equity" && comps_data?.available === true;
 
   const assetTypeBadge = asset_type === "crypto"
     ? { label: "Crypto",  style: { color: "#F59E0B", borderColor: "rgba(245,158,11,0.4)",  background: "rgba(245,158,11,0.08)"  } }
@@ -212,8 +216,9 @@ export default function TickerCard({ result }) {
         style={{ borderBottom: "1px solid rgba(71,85,105,0.4)" }}
       >
         {[
-          { id: "risk", label: "Risk Analysis" },
-          { id: "dcf",  label: "DCF Valuation" },
+          { id: "risk",  label: "Risk Analysis" },
+          { id: "dcf",   label: "DCF Valuation" },
+          ...(showCompsTab ? [{ id: "comps", label: "Comps" }] : []),
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -483,6 +488,15 @@ export default function TickerCard({ result }) {
               </div>
             </>
           )}
+        </div>
+      )}
+      {/* ── Comps tab ────────────────────────────────────────────────────── */}
+      {activeTab === "comps" && showCompsTab && (
+        <div
+          key="comps"
+          style={{ animation: "argus-fade-in 150ms ease-in-out" }}
+        >
+          <CompsView compsData={comps_data} ticker={ticker} />
         </div>
       )}
     </article>
