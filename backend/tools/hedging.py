@@ -88,7 +88,11 @@ async def generate_hedging_suggestions(
 
     Returns:
         {
-            "ticker_hedges": [{"ticker", "hedge_instrument", "explanation"}, ...],
+            "ticker_hedges": [
+                {"ticker": "X", "hedges": [{"rank", "hedge_instrument", "hedge_type",
+                                            "conviction", "explanation"}, ...]},
+                ...
+            ],
             "portfolio_recommendations": ["...", ...],
         }
         On failure: {"ticker_hedges": [], "portfolio_recommendations": [...], "error": True}
@@ -98,7 +102,7 @@ async def generate_hedging_suggestions(
             ticker_results, sector_concentration, overall_sentiment
         )
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.3, max_tokens=600)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.3, max_tokens=900)
 
         prompt_text = HEDGING_USER_TEMPLATE.format(
             portfolio_context=portfolio_context

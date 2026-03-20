@@ -1,5 +1,23 @@
 import React, { useState } from "react";
 
+/** Map conviction string to display color and short label. */
+function convictionStyle(conviction) {
+  if (conviction === "high")   return { color: "#F59E0B", label: "HIGH" };
+  if (conviction === "medium") return { color: "#94a3b8", label: "MED"  };
+  return                              { color: "#64748b", label: "LOW"  };
+}
+
+/** Convert snake_case hedge_type to a readable tag string. */
+function hedgeTypeLabel(hedgeType) {
+  const map = {
+    inverse_etf:      "INVERSE ETF",
+    safe_haven:       "SAFE HAVEN",
+    sector_rotation:  "SECTOR ROTATION",
+    options_concept:  "OPTIONS",
+  };
+  return map[hedgeType] ?? (hedgeType ?? "").toUpperCase().replace(/_/g, " ");
+}
+
 /**
  * HedgingSuggestions
  *
@@ -85,31 +103,96 @@ export default function HedgingSuggestions({ hedgingSuggestions }) {
               </h3>
 
               <div className="space-y-0">
-                {ticker_hedges.map((item, i) => (
-                  <div key={item.ticker}>
-                    <div className="py-3">
-                      {/* Ticker + arrow + instrument */}
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="mono text-xs text-slate-400/70 bg-slate-700/50 border border-slate-600/40 rounded-full px-2.5 py-0.5 shrink-0">
+                {ticker_hedges.map((item, i) => {
+                  // Backward compat: old format has hedge_instrument at item level
+                  const hedges = item.hedges ?? [
+                    {
+                      rank: 1,
+                      hedge_instrument: item.hedge_instrument,
+                      hedge_type: null,
+                      conviction: "high",
+                      explanation: item.explanation,
+                    },
+                  ];
+
+                  return (
+                    <div key={item.ticker}>
+                      <div className="py-3">
+                        {/* Ticker badge */}
+                        <span className="mono text-xs text-slate-400/70 bg-slate-700/50 border border-slate-600/40 rounded-full px-2.5 py-0.5 inline-block mb-3">
                           {item.ticker}
                         </span>
-                        <span className="text-slate-500 text-xs">→</span>
-                        <span className="text-sm font-semibold text-slate-100">
-                          {item.hedge_instrument}
-                        </span>
-                      </div>
-                      {/* Explanation */}
-                      <p className="text-xs text-slate-400/80 leading-relaxed pl-1">
-                        {item.explanation}
-                      </p>
-                    </div>
 
-                    {/* Divider between items, not after the last */}
-                    {i < ticker_hedges.length - 1 && (
-                      <div style={{ borderTop: "1px solid rgba(71,85,105,0.3)" }} />
-                    )}
-                  </div>
-                ))}
+                        {/* Ranked hedges */}
+                        <div className="space-y-0">
+                          {hedges.map((hedge, hi) => {
+                            const { color, label: convLabel } = convictionStyle(hedge.conviction);
+                            const instrumentColor =
+                              hedge.rank === 1 ? "#e2e8f0"
+                              : hedge.rank === 2 ? "#94a3b8"
+                              : "#64748b";
+
+                            return (
+                              <div key={hedge.rank}>
+                                <div className="py-2">
+                                  {/* Rank + instrument + conviction + type */}
+                                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                                    {/* Rank circle */}
+                                    <span
+                                      className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+                                      style={{
+                                        background: hedge.rank === 1 ? "rgba(245,158,11,0.15)" : "rgba(51,65,85,0.4)",
+                                        color:      hedge.rank === 1 ? "#F59E0B" : "#94a3b8",
+                                        border:     hedge.rank === 1 ? "1px solid rgba(245,158,11,0.3)" : "1px solid rgba(51,65,85,0.5)",
+                                      }}
+                                    >
+                                      {hedge.rank}
+                                    </span>
+                                    <span className="text-slate-500 text-xs">→</span>
+                                    {/* Instrument */}
+                                    <span className="text-sm font-semibold" style={{ color: instrumentColor }}>
+                                      {hedge.hedge_instrument}
+                                    </span>
+                                    {/* Conviction badge */}
+                                    <span
+                                      className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                                      style={{
+                                        color,
+                                        background: `${color}18`,
+                                        border: `1px solid ${color}40`,
+                                      }}
+                                    >
+                                      {convLabel}
+                                    </span>
+                                    {/* Hedge type tag */}
+                                    {hedge.hedge_type && (
+                                      <span className="text-xs font-medium" style={{ color: "#475569" }}>
+                                        {hedgeTypeLabel(hedge.hedge_type)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {/* Explanation */}
+                                  <p className="text-xs leading-relaxed pl-7" style={{ color: "rgba(148,163,184,0.65)" }}>
+                                    {hedge.explanation}
+                                  </p>
+                                </div>
+                                {/* Thin divider between hedges within same ticker */}
+                                {hi < hedges.length - 1 && (
+                                  <div style={{ borderTop: "1px solid rgba(51,65,85,0.2)" }} />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Thicker divider between different tickers */}
+                      {i < ticker_hedges.length - 1 && (
+                        <div style={{ borderTop: "1px solid rgba(71,85,105,0.3)" }} />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

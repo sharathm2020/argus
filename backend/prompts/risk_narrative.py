@@ -80,7 +80,7 @@ no markdown, no bullet points.\
 
 HEDGING_SYSTEM_PROMPT = """\
 You are a portfolio risk advisor specializing in hedging strategies. \
-Your job is to review a portfolio's risk signals and suggest targeted hedges. \
+Your job is to review a portfolio's risk signals and suggest targeted, ranked hedges. \
 You always respond with valid JSON only — no markdown fences, no commentary outside the JSON object.\
 """
 
@@ -93,10 +93,23 @@ Portfolio Overview:
 Instructions:
 - For Section 1 (ticker_hedges): only include tickers where sentiment is \
 "negative" OR DCF verdict is "Overvalued". Skip all neutral/positive tickers \
-with no DCF concern. For each included ticker, suggest ONE specific hedge instrument. \
-Prefer inverse ETFs for broad market exposure (SH for S&P short, PSQ for QQQ short, \
-SQQQ for aggressive tech short), sector safe havens (XLP for consumer staples, GLD for \
-macro uncertainty, TLT for rate risk), or put options as a general concept (not specific strikes).
+with no DCF concern. For each included ticker, generate 2-3 ranked hedge suggestions \
+using different hedge types for diversity.
+
+Available hedge types and instruments:
+  * inverse_etf: SQQQ, PSQ, SH, DOG, RWM (short Russell 2000)
+  * safe_haven: GLD, TLT, VXX, VIXY
+  * sector_rotation: XLP, XLU, XLV, XLF (rotate to defensive sectors)
+  * options_concept: describe a protective put or collar conceptually — \
+e.g. "consider put protection on X" — no specific strikes or expiry
+
+Ranking rules:
+  - Rank 1 is highest conviction based on strength of negative signals
+  - Use different hedge_type values across the 2-3 hedges for each ticker
+  - conviction must be "high", "medium", or "low"
+  - Only use options_concept as rank 3, and only when the signal is very strong \
+or other hedge types have been exhausted
+  - Keep explanations concise — one sentence each
 
 - For Section 2 (portfolio_recommendations): write 2-3 bullet points addressing the \
 overall picture. Address sector concentration if flagged. Address overall sentiment direction. \
@@ -108,8 +121,22 @@ Respond ONLY in this exact JSON format with no markdown fences and no text outsi
   "ticker_hedges": [
     {{
       "ticker": "TICKER",
-      "hedge_instrument": "Instrument name",
-      "explanation": "One sentence explaining why this hedge fits this position"
+      "hedges": [
+        {{
+          "rank": 1,
+          "hedge_instrument": "Instrument name",
+          "hedge_type": "inverse_etf",
+          "conviction": "high",
+          "explanation": "One sentence explaining why this hedge fits this position"
+        }},
+        {{
+          "rank": 2,
+          "hedge_instrument": "Instrument name",
+          "hedge_type": "safe_haven",
+          "conviction": "medium",
+          "explanation": "One sentence explaining why this hedge fits this position"
+        }}
+      ]
     }}
   ],
   "portfolio_recommendations": [
