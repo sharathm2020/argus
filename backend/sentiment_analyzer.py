@@ -108,12 +108,13 @@ def analyze_sentiment(text: str) -> Dict:
 
     Returns:
         {
-            "label":      "positive" | "negative" | "neutral",
+            "label":      "positive" | "negative" | "neutral" | "mixed",
             "score":      float,   # confidence of the predicted class (0–1)
             "all_scores": {
                 "positive": float,
                 "negative": float,
                 "neutral":  float,
+                "mixed":    float,
             }
         }
 
@@ -134,9 +135,9 @@ def analyze_sentiment(text: str) -> Dict:
     with torch.no_grad():
         outputs = _model(**inputs)
 
-    probs = F.softmax(outputs.logits, dim=-1).squeeze(0)  # shape: (3,)
+    probs = F.softmax(outputs.logits, dim=-1).squeeze(0)  # shape: (num_labels,)
 
-    # id2label from model config: {0: "negative", 1: "neutral", 2: "positive"}
+    # id2label from model config: {0: "negative", 1: "neutral", 2: "positive", 3: "mixed"}
     id2label = _model.config.id2label
     predicted_id = int(torch.argmax(probs).item())
     label = id2label[predicted_id]

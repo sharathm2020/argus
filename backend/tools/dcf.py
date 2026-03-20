@@ -4,6 +4,11 @@ DCF (Discounted Cash Flow) intrinsic value calculator.
 Fetches financial data from the FMP stable API and runs a 5-year DCF model.
 Returns {"available": False, "reason": "..."} for any asset where the model
 cannot be meaningfully applied (ETFs, cryptos, negative FCF, missing data).
+
+ARG-27: Discount rate is now CAPM-derived per ticker:
+    discount_rate = risk_free_rate + beta * EQUITY_RISK_PREMIUM
+  capped between 6% and 20%.  Caller fetches risk_free_rate once via
+  fetch_risk_free_rate() and passes it in to avoid redundant API calls.
 """
 
 import asyncio
@@ -16,36 +21,62 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _FMP_BASE = "https://financialmodelingprep.com/stable"
-_TERMINAL_GROWTH_RATE = 0.025
 _PROJECTION_YEARS = 5
 
-# Sector keyword → WACC (discount rate)
-_SECTOR_WACC: Dict[str, float] = {
-    "technology":  0.10,
-    "healthcare":  0.09,
-    "financial":   0.10,
-    "finance":     0.10,
-    "energy":      0.11,
-    "consumer":    0.09,
-    "industrials": 0.10,
-}
-_DEFAULT_WACC = 0.10
+# CAPM parameters
+_EQUITY_RISK_PREMIUM = 0.055   # Damodaran estimate
+_RISK_FREE_RATE_FALLBACK = 0.043  # 4.3% — used when treasury fetch fails
+_CAPM_MIN = 0.06
+_CAPM_MAX = 0.20
 
 
-def _wacc_for_sector(sector: str) -> float:
-    sector_lower = (sector or "").lower()
-    for keyword, rate in _SECTOR_WACC.items():
-        if keyword in sector_lower:
-            return rate
-    return _DEFAULT_WACC
+async def fetch_risk_free_rate() -> float:
+    """
+    Fetch the current 10-year US Treasury yield from FMP.
+
+    Returns a decimal (e.g. 0.043 for 4.3%). Falls back to
+    _RISK_FREE_RATE_FALLBACK on any failure. Intended to be called once
+    per analysis job and shared across all calculate_dcf() calls.
+    """
+    api_key = os.environ.get("FMP_API_KEY", "")
+    if not api_key:
+        return _RISK_FREE_RATE_FALLBACK
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{_FMP_BASE}/treasury-rates",
+                params={"apikey": api_key},
+            )
+        if response.status_code != 200:
+            return _RISK_FREE_RATE_FALLBACK
+        data = response.json()
+        if isinstance(data, list) and data:
+            raw = data[0].get("year10")
+            if raw and float(raw) > 0:
+                rate = float(raw)
+                # FMP returns percentage form (e.g. 4.3); convert to decimal
+                if rate > 1:
+                    rate /= 100
+                return rate
+    except Exception as exc:
+        logger.warning("Treasury rate fetch failed: %s", exc)
+    return _RISK_FREE_RATE_FALLBACK
 
 
-async def calculate_dcf(ticker: str) -> Dict[str, Any]:
+async def calculate_dcf(
+    ticker: str,
+    risk_free_rate: float = _RISK_FREE_RATE_FALLBACK,
+) -> Dict[str, Any]:
     """
     Compute a 5-year DCF intrinsic value estimate for *ticker*.
 
     All four FMP endpoints are fetched concurrently. Returns immediately with
     available=False if any required field is missing, zero, or negative.
+
+    Args:
+        ticker:         Ticker symbol.
+        risk_free_rate: 10-year Treasury yield as a decimal (e.g. 0.043).
+                        Fetch once per job via fetch_risk_free_rate().
 
     Returns:
         On success:
@@ -59,20 +90,25 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
                     "free_cash_flow": float,
                     "growth_rate": float,
                     "discount_rate": float,
+                    "beta": float,
                     "terminal_growth_rate": 0.025,
                     "projection_years": 5,
                     "shares_outstanding": float,
                 },
             }
         On failure:
-            {"available": False, "reason": "<explanation>"}
+            {
+                "available": False,
+                "reason": "<explanation>",
+                "insufficient_data": True,   # present when equity data is missing/incomplete
+            }
     """
     api_key = os.environ.get("FMP_API_KEY", "")
     if not api_key:
         return {"available": False, "reason": "FMP_API_KEY not configured"}
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             cf_res, quote_res, income_res, profile_res = await asyncio.gather(
                 client.get(
                     f"{_FMP_BASE}/cash-flow-statement",
@@ -99,41 +135,65 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
 
         # ── Free Cash Flow ────────────────────────────────────────────────────
         if not cf_data or not isinstance(cf_data, list):
-            return {"available": False, "reason": "No free cash flow data available"}
+            return {"available": False, "reason": "No free cash flow data available", "insufficient_data": True}
         fcf = cf_data[0].get("freeCashFlow")
         if fcf is None:
-            return {"available": False, "reason": "No free cash flow data available"}
+            return {"available": False, "reason": "No free cash flow data available", "insufficient_data": True}
         if fcf <= 0:
-            return {"available": False, "reason": "DCF requires positive free cash flow"}
+            return {"available": False, "reason": "DCF requires positive free cash flow", "insufficient_data": True}
 
         # ── Price + Shares Outstanding ────────────────────────────────────────
         if not quote_data or not isinstance(quote_data, list):
-            return {"available": False, "reason": "No quote data available"}
+            return {"available": False, "reason": "No quote data available", "insufficient_data": True}
         quote = quote_data[0]
         current_price = quote.get("price")
         if not current_price:
-            return {"available": False, "reason": "Missing price or shares outstanding data"}
+            return {"available": False, "reason": "Missing price or shares outstanding data", "insufficient_data": True}
 
         # ── Revenue Growth Rate ───────────────────────────────────────────────
         if not income_data or not isinstance(income_data, list) or len(income_data) < 2:
-            return {"available": False, "reason": "Insufficient revenue history for growth calculation"}
+            return {"available": False, "reason": "Insufficient revenue history for growth calculation", "insufficient_data": True}
         rev_year1 = income_data[0].get("revenue")
         rev_year2 = income_data[1].get("revenue")
         if not rev_year1 or not rev_year2 or rev_year2 == 0:
-            return {"available": False, "reason": "Revenue data unavailable"}
+            return {"available": False, "reason": "Revenue data unavailable", "insufficient_data": True}
         raw_growth = (rev_year1 - rev_year2) / rev_year2
-        # Cap growth between 2% and 25%
-        growth_rate = max(0.02, min(0.25, raw_growth))
+        # Cap growth between 2% and 40% (raised ceiling for high-growth companies)
+        growth_rate = max(0.02, min(0.40, raw_growth))
+
+        # Dynamic terminal growth rate based on raw (uncapped) growth trajectory
+        if raw_growth > 0.25:
+            terminal_growth_rate = 0.040
+        elif raw_growth > 0.15:
+            terminal_growth_rate = 0.035
+        else:
+            terminal_growth_rate = 0.025
 
         shares_outstanding = income_data[0].get("weightedAverageShsOut")
         if not shares_outstanding or shares_outstanding <= 0:
-            return {"available": False, "reason": "Missing price or shares outstanding data"}
+            return {"available": False, "reason": "Missing price or shares outstanding data", "insufficient_data": True}
 
-        # ── Sector → WACC ─────────────────────────────────────────────────────
+        # ── CAPM Discount Rate ────────────────────────────────────────────────
+        # freeCashFlow from FMP is levered FCF (post-interest).
+        # CAPM (cost of equity) is the correct discount rate for levered FCF.
+        # Using WACC here would be incorrect.
         sector = "Unknown"
+        beta = 1.0
         if profile_data and isinstance(profile_data, list):
-            sector = profile_data[0].get("sector", "Unknown")
-        discount_rate = _wacc_for_sector(sector)
+            profile = profile_data[0]
+            sector = profile.get("sector", "Unknown")
+            raw_beta = profile.get("beta")
+            if raw_beta is not None:
+                try:
+                    beta = float(raw_beta)
+                except (TypeError, ValueError):
+                    beta = 1.0
+
+        capm_rate = risk_free_rate + beta * _EQUITY_RISK_PREMIUM
+        discount_rate = max(_CAPM_MIN, min(_CAPM_MAX, capm_rate))
+
+        # Enforce terminal_growth_rate < discount_rate - 0.01 to keep Gordon Growth Model valid
+        terminal_growth_rate = min(terminal_growth_rate, discount_rate - 0.01)
 
         # ── DCF Model ─────────────────────────────────────────────────────────
         projected_fcfs = [
@@ -147,8 +207,8 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
 
         year5_fcf = projected_fcfs[-1]
         terminal_value = (
-            year5_fcf * (1 + _TERMINAL_GROWTH_RATE)
-        ) / (discount_rate - _TERMINAL_GROWTH_RATE)
+            year5_fcf * (1 + terminal_growth_rate)
+        ) / (discount_rate - terminal_growth_rate)
         discounted_tv = terminal_value / (1 + discount_rate) ** _PROJECTION_YEARS
 
         total_intrinsic = sum(discounted_fcfs) + discounted_tv
@@ -158,6 +218,7 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
             return {
                 "available": False,
                 "reason": "DCF model produced a non-positive intrinsic value",
+                "insufficient_data": True,
             }
 
         # ── Margin of Safety + Verdict ────────────────────────────────────────
@@ -183,7 +244,8 @@ async def calculate_dcf(ticker: str) -> Dict[str, Any]:
                 "free_cash_flow": float(fcf),
                 "growth_rate": round(float(growth_rate), 4),
                 "discount_rate": round(float(discount_rate), 4),
-                "terminal_growth_rate": _TERMINAL_GROWTH_RATE,
+                "beta": round(float(beta), 2),
+                "terminal_growth_rate": terminal_growth_rate,
                 "projection_years": _PROJECTION_YEARS,
                 "shares_outstanding": float(shares_outstanding),
             },

@@ -20,6 +20,7 @@ ALPACA_NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
 
 # Maximum articles to fetch per ticker
 MAX_ARTICLES_PER_TICKER = 5
+ALPACA_MAX_LIMIT = 50
 
 
 def fetch_news_batch(tickers: List[str]) -> Dict[str, List[str]]:
@@ -54,7 +55,7 @@ def fetch_news_batch(tickers: List[str]) -> Dict[str, List[str]]:
             },
             params={
                 "symbols": symbols_param,
-                "limit": MAX_ARTICLES_PER_TICKER * len(tickers),
+                "limit": min(MAX_ARTICLES_PER_TICKER * len(tickers), ALPACA_MAX_LIMIT),
                 "sort": "desc",
             },
             timeout=15,
@@ -113,8 +114,10 @@ def fetch_stock_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
             result[ticker] = {
                 "current_price": profile.get("price"),
                 "sector": profile.get("sector", "Unknown"),
+                "industry": profile.get("industry", ""),
                 "market_cap": profile.get("mktCap"),
                 "company_name": profile.get("companyName", ticker),
+                "is_etf": profile.get("isEtf", False) is True,
             }
             time.sleep(0.2)
 
@@ -123,8 +126,10 @@ def fetch_stock_info_batch(tickers: List[str]) -> Dict[str, Dict[str, Any]]:
             result[ticker] = {
                 "current_price": None,
                 "sector": "Unknown",
+                "industry": "",
                 "market_cap": None,
                 "company_name": ticker,
+                "is_etf": False,
             }
 
     return result

@@ -28,7 +28,8 @@ load_dotenv()
 from agent import run_portfolio_analysis
 from job_store import JobResult, JobStatus, job_store
 from models.schemas import PortfolioRequest
-from tools.edgar import fetch_risk_factors_batch
+from db.supabase_client import query_sentiment_history
+from tools.edgar import clean_risk_factors_batch, fetch_risk_factors_batch
 from tools.news import fetch_news_batch, fetch_stock_info_batch
 from tools.portfolio import parse_portfolio
 
@@ -134,6 +135,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> No
         job_store.update_job(job_id, JobStatus.PROCESSING, "Downloading SEC 10-K filings from EDGAR...")
 
         risk_factors = await asyncio.to_thread(fetch_risk_factors_batch, tickers)
+        risk_factors = await clean_risk_factors_batch(risk_factors)
 
         # ── Phase 3: signal extraction complete — hand off to agent ─────────
         job_store.update_job(job_id, JobStatus.PROCESSING, "Extracting risk factors from filings...")
@@ -216,6 +218,25 @@ async def get_job(job_id: str) -> JobResult:
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found or expired.")
     return job
+
+
+@app.get(
+    "/api/sentiment-history/{ticker}",
+    tags=["analysis"],
+    summary="Retrieve historical sentiment scores for a ticker",
+)
+async def get_sentiment_history(ticker: str):
+    """
+    Return the 90 most recent sentiment_history rows for the given ticker,
+    ordered newest first.
+    """
+    ticker_upper = ticker.upper().strip()
+    try:
+        rows = await asyncio.to_thread(query_sentiment_history, ticker_upper, 90)
+    except Exception as exc:
+        logger.error("sentiment_history query failed for %s: %s", ticker_upper, exc)
+        raise HTTPException(status_code=503, detail="Sentiment history temporarily unavailable.")
+    return {"ticker": ticker_upper, "history": rows}
 
 
 _PARSE_IMAGE_SYSTEM_PROMPT = (

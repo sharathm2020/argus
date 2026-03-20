@@ -10,7 +10,7 @@ langchain-core==0.3.18
 # ── Data / Finance ────────────────────────────────────────────────────────────
 #  — stock fundamentals now fetched via Financial Modeling Prep API
 requests==2.32.3
-yfinance==0.2.54
+yfinance==1.2.0
 
 # ── HTTP client (EDGAR REST API + async requests) ─────────────────────────────
 # sec-edgar-downloader removed — EDGAR data now fetched via REST API using httpx
@@ -27,5 +27,8 @@ torch==2.4.0+cpu
 transformers==4.40.0
 accelerate==0.29.0
 huggingface_hub==0.23.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+supabase
 
 # ── Note: uuid and asyncio are Python stdlib — no install required ─────────────

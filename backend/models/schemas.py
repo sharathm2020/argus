@@ -55,6 +55,10 @@ class TickerRiskResult(BaseModel):
     edgar_excerpt: Optional[str] = None        # Short excerpt from SEC 10-K risk factors
     confidence_score: Optional[float] = None  # DistilBERT confidence (0–1)
     dcf_data: Optional[dict] = None           # DCF intrinsic value breakdown
+    asset_type: Optional[str] = None          # "equity" | "etf" | "crypto"
+    industry: Optional[str] = None            # FMP industry label (fallback for sector)
+    comps_data: Optional[dict] = None         # Comparable company analysis
+    options_hedge: Optional[dict] = None      # GPT-4o options-based hedge recommendation
 
 
 class PortfolioRiskResponse(BaseModel):

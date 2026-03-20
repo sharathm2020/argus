@@ -265,7 +265,7 @@ export default function App() {
               overallSentiment={analysisData.overall_sentiment}
               sectorConcentration={analysisData.sector_concentration}
             />
-            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} />
+            <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} results={analysisData.results} />
           </div>
         )}
       </main>
@@ -273,7 +273,7 @@ export default function App() {
       {/* ── Footer ──────────────────────────────────────────────────────── */}
       <footer className="border-t border-slate-700/40 mt-8 py-7">
         <div className="max-w-[1400px] mx-auto px-8 flex items-center justify-between text-xs text-slate-500">
-          <span className="mono">ARGUS v0.3.0</span>
+          <span className="mono">ARGUS v0.4.0</span>
           <span>For informational purposes only. Not financial advice.</span>
         </div>
       </footer>

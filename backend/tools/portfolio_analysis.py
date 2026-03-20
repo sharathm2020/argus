@@ -29,6 +29,14 @@ def calculate_sector_concentration(results: List[TickerRiskResult]) -> Dict[str,
         sector = "Unknown"
         if r.dcf_data and r.dcf_data.get("available") and r.dcf_data.get("sector"):
             sector = r.dcf_data["sector"]
+        elif r.asset_type == "crypto":
+            sector = "Cryptocurrency"
+        elif r.asset_type == "etf":
+            sector = "ETF"
+        elif r.asset_type == "equity":
+            # DCF sector missing/unknown — fall back to FMP industry, then generic label
+            industry = (r.industry or "").strip()
+            sector = industry if industry else "Other/Unclassified"
         sector_weights[sector] = sector_weights.get(sector, 0.0) + r.weight
 
     breakdown = {s: round(w * 100, 1) for s, w in sector_weights.items()}

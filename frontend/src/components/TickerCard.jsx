@@ -1,16 +1,23 @@
 import React, { useState } from "react";
+import SentimentTrendModal from "./SentimentTrendModal";
+import CompsView from "./CompsView";
 
 /**
  * Sentiment badge component.
- * score > 0.2  → green  "Positive"
- * score < -0.2 → red    "Negative"
- * otherwise    → amber  "Neutral"
+ * label="mixed"  → purple "Mixed"
+ * score > 0.2    → green  "Positive"
+ * score < -0.2   → red    "Negative"
+ * otherwise      → amber  "Neutral"
  */
-function SentimentBadge({ score, confidenceScore }) {
+function SentimentBadge({ score, confidenceScore, label: sentimentLabel }) {
+  const isMixed = sentimentLabel === "mixed";
+
   let className = "badge-neutral";
   let label = "Neutral";
 
-  if (score > 0.2) {
+  if (isMixed) {
+    label = "Mixed";
+  } else if (score > 0.2) {
     className = "badge-positive";
     label = "Positive";
   } else if (score < -0.2) {
@@ -25,7 +32,10 @@ function SentimentBadge({ score, confidenceScore }) {
 
   return (
     <span className="relative group inline-block">
-      <span className={className}>
+      <span
+        className={className}
+        style={isMixed ? { backgroundColor: "#7C3AED", color: "white" } : undefined}
+      >
         {label} ({detail})
       </span>
       {/* Tooltip */}
@@ -112,6 +122,7 @@ export default function TickerCard({ result }) {
   const [isHovered, setIsHovered] = useState(false);
   const [edgarExpanded, setEdgarExpanded] = useState(false);
   const [dcfInputsExpanded, setDcfInputsExpanded] = useState(false);
+  const [showTrendModal, setShowTrendModal] = useState(false);
 
   const {
     ticker,
@@ -123,7 +134,17 @@ export default function TickerCard({ result }) {
     news_headlines,
     edgar_excerpt,
     dcf_data,
+    asset_type,
+    comps_data,
   } = result;
+
+  const showCompsTab = asset_type === "equity" && comps_data?.available === true;
+
+  const assetTypeBadge = asset_type === "crypto"
+    ? { label: "Crypto",  style: { color: "#F59E0B", borderColor: "rgba(245,158,11,0.4)",  background: "rgba(245,158,11,0.08)"  } }
+    : asset_type === "etf"
+    ? { label: "ETF",     style: { color: "#60A5FA", borderColor: "rgba(96,165,250,0.4)",  background: "rgba(96,165,250,0.08)"  } }
+    : { label: "Equity",  style: { color: "#94A3B8", borderColor: "rgba(148,163,184,0.3)", background: "rgba(148,163,184,0.06)" } };
 
   const displayedHeadlines = newsExpanded ? news_headlines : news_headlines.slice(0, 2);
 
@@ -135,6 +156,7 @@ export default function TickerCard({ result }) {
   const dcfAvailable = dcf_data && dcf_data.available;
 
   return (
+    <>
     <article
       className="rounded-lg p-6 animate-fade-in-up flex flex-col transition-all duration-200 ease-in-out"
       style={{
@@ -164,10 +186,28 @@ export default function TickerCard({ result }) {
           <span className="mono text-xs text-slate-400/70 bg-slate-700/50 border border-slate-600/40 rounded-full px-2.5 py-0.5 shrink-0">
             {(weight * 100).toFixed(1)}%
           </span>
+          {/* Asset type badge */}
+          <span
+            className="text-xs font-semibold px-2 py-0.5 rounded-full border shrink-0"
+            style={assetTypeBadge.style}
+          >
+            {assetTypeBadge.label}
+          </span>
         </div>
 
-        {/* Sentiment badge — pushed to the right */}
-        <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} />
+        {/* Sentiment badge + trend link — pushed to the right */}
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} label={result.sentiment_label} />
+          <button
+            onClick={() => setShowTrendModal(true)}
+            className="text-xs font-medium transition-colors"
+            style={{ color: "#F59E0B" }}
+            onMouseEnter={(e) => (e.target.style.color = "#FCD34D")}
+            onMouseLeave={(e) => (e.target.style.color = "#F59E0B")}
+          >
+            View Trend →
+          </button>
+        </div>
       </div>
 
       {/* ── Tab bar ──────────────────────────────────────────────────────── */}
@@ -176,8 +216,9 @@ export default function TickerCard({ result }) {
         style={{ borderBottom: "1px solid rgba(71,85,105,0.4)" }}
       >
         {[
-          { id: "risk", label: "Risk Analysis" },
-          { id: "dcf",  label: "DCF Valuation" },
+          { id: "risk",  label: "Risk Analysis" },
+          { id: "dcf",   label: "DCF Valuation" },
+          ...(showCompsTab ? [{ id: "comps", label: "Comps" }] : []),
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -364,9 +405,22 @@ export default function TickerCard({ result }) {
                 border: "1px solid rgba(51,65,85,0.4)",
               }}
             >
-              <p className="text-slate-400 mb-1">DCF analysis not available for this asset.</p>
-              {dcf_data?.reason && (
-                <p className="text-xs text-slate-600 italic">{dcf_data.reason}</p>
+              {dcf_data?.insufficient_data ? (
+                <>
+                  <p className="text-slate-400 mb-1">
+                    DCF valuation unavailable — insufficient financial data for {ticker}.
+                  </p>
+                  <p className="text-xs text-slate-600 italic">
+                    This is common for recently listed companies, SPACs, or non-standard reporting entities.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-slate-400 mb-1">DCF analysis not available for this asset.</p>
+                  {dcf_data?.reason && (
+                    <p className="text-xs text-slate-600 italic">{dcf_data.reason}</p>
+                  )}
+                </>
               )}
             </div>
           ) : (
@@ -417,11 +471,12 @@ export default function TickerCard({ result }) {
                     }}
                   >
                     {[
-                      ["Free Cash Flow",         formatCashflow(dcf_data.inputs.free_cash_flow)],
-                      ["Revenue Growth Rate",    `${(dcf_data.inputs.growth_rate * 100).toFixed(1)}%`],
-                      ["Discount Rate (WACC)",   `${(dcf_data.inputs.discount_rate * 100).toFixed(1)}%`],
-                      ["Terminal Growth Rate",   `${(dcf_data.inputs.terminal_growth_rate * 100).toFixed(1)}%`],
-                      ["Projection Years",       String(dcf_data.inputs.projection_years)],
+                      ["Free Cash Flow",          formatCashflow(dcf_data.inputs.free_cash_flow)],
+                      ["Revenue Growth Rate",     `${(dcf_data.inputs.growth_rate * 100).toFixed(1)}%`],
+                      ["Discount Rate (CAPM)",    `${(dcf_data.inputs.discount_rate * 100).toFixed(1)}%`],
+                      ...(dcf_data.inputs.beta != null ? [["Beta", dcf_data.inputs.beta.toFixed(2)]] : []),
+                      ["Terminal Growth Rate",    `${(dcf_data.inputs.terminal_growth_rate * 100).toFixed(1)}%`],
+                      ["Projection Years",        String(dcf_data.inputs.projection_years)],
                     ].map(([label, value]) => (
                       <div key={label} className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">{label}</span>
@@ -435,6 +490,24 @@ export default function TickerCard({ result }) {
           )}
         </div>
       )}
+      {/* ── Comps tab ────────────────────────────────────────────────────── */}
+      {activeTab === "comps" && showCompsTab && (
+        <div
+          key="comps"
+          style={{ animation: "argus-fade-in 150ms ease-in-out" }}
+        >
+          <CompsView compsData={comps_data} ticker={ticker} />
+        </div>
+      )}
     </article>
+
+    {/* Sentiment trend modal — rendered outside the article so it isn't clipped */}
+    {showTrendModal && (
+      <SentimentTrendModal
+        ticker={ticker}
+        onClose={() => setShowTrendModal(false)}
+      />
+    )}
+  </>
   );
 }
