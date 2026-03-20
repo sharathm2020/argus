@@ -20,6 +20,7 @@ ALPACA_NEWS_URL = "https://data.alpaca.markets/v1beta1/news"
 
 # Maximum articles to fetch per ticker
 MAX_ARTICLES_PER_TICKER = 5
+ALPACA_MAX_LIMIT = 50
 
 
 def fetch_news_batch(tickers: List[str]) -> Dict[str, List[str]]:
@@ -54,7 +55,7 @@ def fetch_news_batch(tickers: List[str]) -> Dict[str, List[str]]:
             },
             params={
                 "symbols": symbols_param,
-                "limit": MAX_ARTICLES_PER_TICKER * len(tickers),
+                "limit": min(MAX_ARTICLES_PER_TICKER * len(tickers), ALPACA_MAX_LIMIT),
                 "sort": "desc",
             },
             timeout=15,
