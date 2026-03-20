@@ -22,7 +22,7 @@ from prompts.risk_narrative import (
 from job_store import job_store, JobStatus
 from db.supabase_client import write_sentiment_history
 from sentiment_analyzer import analyze_sentiment
-from tools.dcf import calculate_dcf
+from tools.dcf import calculate_dcf, fetch_risk_free_rate
 from tools.hedging import generate_hedging_suggestions
 from tools.portfolio_analysis import calculate_sector_concentration
 from utils.asset_classifier import classify_ticker
@@ -60,6 +60,7 @@ async def analyze_ticker(
     risk_factors: str,
     llm: ChatOpenAI,
     model: str = MODEL_FULL,
+    risk_free_rate: float = 0.043,
 ) -> TickerRiskResult:
     """
     Run the risk narrative LLM call for a single ticker.
@@ -94,7 +95,7 @@ async def analyze_ticker(
     if asset_type == "equity":
         llm_result, dcf_data = await asyncio.gather(
             chain.ainvoke({}),
-            calculate_dcf(ticker),
+            calculate_dcf(ticker, risk_free_rate=risk_free_rate),
             return_exceptions=True,
         )
     else:
@@ -258,6 +259,10 @@ async def run_portfolio_analysis(
             job_id, n_tickers, strategy,
         )
 
+        # Fetch risk-free rate once; shared across all per-ticker DCF calls
+        risk_free_rate = await fetch_risk_free_rate()
+        logger.info("Job %s — risk-free rate: %.4f", job_id, risk_free_rate)
+
         # ── Phase 4: per-ticker LLM calls ────────────────────────────────
         if strategy == "full":
             job_store.update_job(
@@ -273,6 +278,7 @@ async def run_portfolio_analysis(
                     risk_factors=risk_factors.get(ticker, ""),
                     llm=_get_llm(model=MODEL_FULL),
                     model=MODEL_FULL,
+                    risk_free_rate=risk_free_rate,
                 )
                 for ticker, weight in positions
             ]))
@@ -292,6 +298,7 @@ async def run_portfolio_analysis(
                     risk_factors=risk_factors.get(ticker, ""),
                     llm=_get_llm(model=MODEL_MINI),
                     model=MODEL_MINI,
+                    risk_free_rate=risk_free_rate,
                 )
                 for ticker, weight in positions
             ]))
@@ -317,6 +324,7 @@ async def run_portfolio_analysis(
                         risk_factors=risk_factors.get(ticker, ""),
                         llm=_get_llm(model=MODEL_MINI),
                         model=MODEL_MINI,
+                        risk_free_rate=risk_free_rate,
                     )
                     for ticker, weight in chunk
                 ])

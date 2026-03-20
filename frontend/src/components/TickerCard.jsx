@@ -400,9 +400,22 @@ export default function TickerCard({ result }) {
                 border: "1px solid rgba(51,65,85,0.4)",
               }}
             >
-              <p className="text-slate-400 mb-1">DCF analysis not available for this asset.</p>
-              {dcf_data?.reason && (
-                <p className="text-xs text-slate-600 italic">{dcf_data.reason}</p>
+              {dcf_data?.insufficient_data ? (
+                <>
+                  <p className="text-slate-400 mb-1">
+                    DCF valuation unavailable — insufficient financial data for {ticker}.
+                  </p>
+                  <p className="text-xs text-slate-600 italic">
+                    This is common for recently listed companies, SPACs, or non-standard reporting entities.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-slate-400 mb-1">DCF analysis not available for this asset.</p>
+                  {dcf_data?.reason && (
+                    <p className="text-xs text-slate-600 italic">{dcf_data.reason}</p>
+                  )}
+                </>
               )}
             </div>
           ) : (
@@ -453,11 +466,12 @@ export default function TickerCard({ result }) {
                     }}
                   >
                     {[
-                      ["Free Cash Flow",         formatCashflow(dcf_data.inputs.free_cash_flow)],
-                      ["Revenue Growth Rate",    `${(dcf_data.inputs.growth_rate * 100).toFixed(1)}%`],
-                      ["Discount Rate (WACC)",   `${(dcf_data.inputs.discount_rate * 100).toFixed(1)}%`],
-                      ["Terminal Growth Rate",   `${(dcf_data.inputs.terminal_growth_rate * 100).toFixed(1)}%`],
-                      ["Projection Years",       String(dcf_data.inputs.projection_years)],
+                      ["Free Cash Flow",          formatCashflow(dcf_data.inputs.free_cash_flow)],
+                      ["Revenue Growth Rate",     `${(dcf_data.inputs.growth_rate * 100).toFixed(1)}%`],
+                      ["Discount Rate (CAPM)",    `${(dcf_data.inputs.discount_rate * 100).toFixed(1)}%`],
+                      ...(dcf_data.inputs.beta != null ? [["Beta", dcf_data.inputs.beta.toFixed(2)]] : []),
+                      ["Terminal Growth Rate",    `${(dcf_data.inputs.terminal_growth_rate * 100).toFixed(1)}%`],
+                      ["Projection Years",        String(dcf_data.inputs.projection_years)],
                     ].map(([label, value]) => (
                       <div key={label} className="flex justify-between items-center text-xs">
                         <span className="text-slate-500">{label}</span>
