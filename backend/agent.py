@@ -27,6 +27,7 @@ from tools.hedging import generate_hedging_suggestions
 from tools.portfolio_analysis import calculate_sector_concentration
 from utils.asset_classifier import classify_ticker
 from data.coingecko_client import get_crypto_data
+from data.comps_client import calculate_comps
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +92,19 @@ async def analyze_ticker(
     ticker_llm = _get_llm(temperature=0.2, model=model)
     chain = prompt | ticker_llm | json_output_parser
 
-    # Run LLM + DCF concurrently for equities; skip DCF for crypto/ETF
+    # Run LLM + DCF concurrently for equities; skip DCF for crypto/ETF.
+    # Comps runs after DCF to avoid peak FMP connection contention.
     if asset_type == "equity":
         llm_result, dcf_data = await asyncio.gather(
             chain.ainvoke({}),
             calculate_dcf(ticker, risk_free_rate=risk_free_rate),
             return_exceptions=True,
         )
+        try:
+            comps_data = await calculate_comps(ticker)
+        except Exception as exc:
+            logger.warning("Comps failed for %s: %s", ticker, exc)
+            comps_data = None
     else:
         llm_result = await chain.ainvoke({})
         reason = (
@@ -106,6 +113,7 @@ async def analyze_ticker(
             else "DCF analysis is not applicable to ETF positions."
         )
         dcf_data = {"available": False, "reason": reason}
+        comps_data = None
 
     if isinstance(llm_result, Exception):
         logger.warning("LLM call failed for %s: %s", ticker, llm_result)
@@ -181,6 +189,7 @@ async def analyze_ticker(
         confidence_score=round(confidence_score, 4) if confidence_score is not None else None,
         dcf_data=dcf_data,
         asset_type=asset_type,
+        comps_data=comps_data,
     )
 
 

@@ -21,7 +21,6 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _FMP_BASE = "https://financialmodelingprep.com/stable"
-_TERMINAL_GROWTH_RATE = 0.025
 _PROJECTION_YEARS = 5
 
 # CAPM parameters
@@ -109,7 +108,7 @@ async def calculate_dcf(
         return {"available": False, "reason": "FMP_API_KEY not configured"}
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=25.0) as client:
             cf_res, quote_res, income_res, profile_res = await asyncio.gather(
                 client.get(
                     f"{_FMP_BASE}/cash-flow-statement",
@@ -159,14 +158,25 @@ async def calculate_dcf(
         if not rev_year1 or not rev_year2 or rev_year2 == 0:
             return {"available": False, "reason": "Revenue data unavailable", "insufficient_data": True}
         raw_growth = (rev_year1 - rev_year2) / rev_year2
-        # Cap growth between 2% and 25%
-        growth_rate = max(0.02, min(0.25, raw_growth))
+        # Cap growth between 2% and 40% (raised ceiling for high-growth companies)
+        growth_rate = max(0.02, min(0.40, raw_growth))
+
+        # Dynamic terminal growth rate based on raw (uncapped) growth trajectory
+        if raw_growth > 0.25:
+            terminal_growth_rate = 0.040
+        elif raw_growth > 0.15:
+            terminal_growth_rate = 0.035
+        else:
+            terminal_growth_rate = 0.025
 
         shares_outstanding = income_data[0].get("weightedAverageShsOut")
         if not shares_outstanding or shares_outstanding <= 0:
             return {"available": False, "reason": "Missing price or shares outstanding data", "insufficient_data": True}
 
         # ── CAPM Discount Rate ────────────────────────────────────────────────
+        # freeCashFlow from FMP is levered FCF (post-interest).
+        # CAPM (cost of equity) is the correct discount rate for levered FCF.
+        # Using WACC here would be incorrect.
         sector = "Unknown"
         beta = 1.0
         if profile_data and isinstance(profile_data, list):
@@ -182,6 +192,9 @@ async def calculate_dcf(
         capm_rate = risk_free_rate + beta * _EQUITY_RISK_PREMIUM
         discount_rate = max(_CAPM_MIN, min(_CAPM_MAX, capm_rate))
 
+        # Enforce terminal_growth_rate < discount_rate - 0.01 to keep Gordon Growth Model valid
+        terminal_growth_rate = min(terminal_growth_rate, discount_rate - 0.01)
+
         # ── DCF Model ─────────────────────────────────────────────────────────
         projected_fcfs = [
             fcf * (1 + growth_rate) ** yr
@@ -194,8 +207,8 @@ async def calculate_dcf(
 
         year5_fcf = projected_fcfs[-1]
         terminal_value = (
-            year5_fcf * (1 + _TERMINAL_GROWTH_RATE)
-        ) / (discount_rate - _TERMINAL_GROWTH_RATE)
+            year5_fcf * (1 + terminal_growth_rate)
+        ) / (discount_rate - terminal_growth_rate)
         discounted_tv = terminal_value / (1 + discount_rate) ** _PROJECTION_YEARS
 
         total_intrinsic = sum(discounted_fcfs) + discounted_tv
@@ -232,7 +245,7 @@ async def calculate_dcf(
                 "growth_rate": round(float(growth_rate), 4),
                 "discount_rate": round(float(discount_rate), 4),
                 "beta": round(float(beta), 2),
-                "terminal_growth_rate": _TERMINAL_GROWTH_RATE,
+                "terminal_growth_rate": terminal_growth_rate,
                 "projection_years": _PROJECTION_YEARS,
                 "shares_outstanding": float(shares_outstanding),
             },

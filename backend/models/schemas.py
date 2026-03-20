@@ -56,6 +56,7 @@ class TickerRiskResult(BaseModel):
     confidence_score: Optional[float] = None  # DistilBERT confidence (0–1)
     dcf_data: Optional[dict] = None           # DCF intrinsic value breakdown
     asset_type: Optional[str] = None          # "equity" | "etf" | "crypto"
+    comps_data: Optional[dict] = None         # Comparable company analysis
 
 
 class PortfolioRiskResponse(BaseModel):
