@@ -225,6 +225,34 @@ async def analyze_ticker(
     )
 
 
+# ── Risk-based ticker selector for large portfolios ──────────────────────────
+
+def select_top_risk_tickers(
+    results: List[TickerRiskResult],
+    n: int = 5,
+) -> List[TickerRiskResult]:
+    """
+    Return the top *n* tickers ranked by a composite risk score.
+
+    risk_score = abs(sentiment_score) * confidence
+                 + (abs(dcf_margin_of_safety) / 100  if DCF available  else 0)
+
+    Applies to all asset types. Used to cap the hedging prompt size
+    for large portfolios and avoid GPT-4o output-limit truncation.
+    """
+    def _score(r: TickerRiskResult) -> float:
+        confidence = r.confidence_score if r.confidence_score is not None else 0.0
+        sentiment_component = abs(r.sentiment_score) * confidence
+        dcf_component = 0.0
+        if r.dcf_data and r.dcf_data.get("available"):
+            mos = r.dcf_data.get("margin_of_safety")
+            if mos is not None:
+                dcf_component = abs(float(mos)) / 100
+        return sentiment_component + dcf_component
+
+    return sorted(results, key=_score, reverse=True)[:n]
+
+
 # ── Portfolio summary ─────────────────────────────────────────────────────────
 
 async def generate_portfolio_summary(
@@ -391,8 +419,17 @@ async def run_portfolio_analysis(
 
         # ── Phase 5b: hedging suggestions (sequential — depends on all results) ──
         job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...")
+        if n_tickers > SMALL_PORTFOLIO_THRESHOLD:
+            hedging_tickers = select_top_risk_tickers(results, n=5)
+            logger.info(
+                "Job %s — large portfolio: selecting top 5 risk tickers for hedging: %s",
+                job_id,
+                [r.ticker for r in hedging_tickers],
+            )
+        else:
+            hedging_tickers = results
         hedging_suggestions = await generate_hedging_suggestions(
-            ticker_results=results,
+            ticker_results=hedging_tickers,
             sector_concentration=sector_concentration,
             overall_sentiment=overall_sentiment,
         )
