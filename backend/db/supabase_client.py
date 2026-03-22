@@ -8,6 +8,12 @@ Exposes:
   get_supabase_client()          — returns the singleton Client
   write_sentiment_history(...)   — inserts one row into sentiment_history
   query_sentiment_history(...)   — reads recent rows for a ticker
+  save_portfolio(...)            — inserts a saved portfolio row
+  get_saved_portfolios(...)      — returns all portfolios for a user
+  delete_portfolio(...)          — deletes a portfolio by id + user_id
+  save_analysis_history(...)     — inserts a full analysis snapshot
+  get_analysis_history(...)      — returns recent analysis list (no snapshot)
+  get_analysis_detail(...)       — returns a single analysis with snapshot
 """
 
 import logging
@@ -107,3 +113,99 @@ def query_sentiment_history(
         .execute()
     )
     return response.data or []
+
+
+# ── Saved portfolios ───────────────────────────────────────────────────────────
+
+def save_portfolio(
+    user_id: str,
+    name: str,
+    tickers: List[str],
+    weights: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Insert a new saved portfolio and return the created row."""
+    client = get_supabase_client()
+    row: Dict[str, Any] = {
+        "user_id": user_id,
+        "name": name,
+        "tickers": tickers,
+        "weights": weights,
+    }
+    response = client.table("saved_portfolios").insert(row).execute()
+    if not response.data:
+        raise RuntimeError("save_portfolio: no data returned from Supabase insert")
+    return response.data[0]
+
+
+def get_saved_portfolios(user_id: str) -> List[Dict[str, Any]]:
+    """Return all saved portfolios for a user, newest first."""
+    client = get_supabase_client()
+    response = (
+        client.table("saved_portfolios")
+        .select("id, name, tickers, weights, created_at, updated_at")
+        .eq("user_id", user_id)
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    return response.data or []
+
+
+def delete_portfolio(portfolio_id: str, user_id: str) -> bool:
+    """Delete a portfolio row, enforcing user_id ownership."""
+    client = get_supabase_client()
+    client.table("saved_portfolios").delete().eq("id", portfolio_id).eq("user_id", user_id).execute()
+    return True
+
+
+# ── Analysis history ───────────────────────────────────────────────────────────
+
+def save_analysis_history(
+    user_id: str,
+    tickers: List[str],
+    overall_sentiment_score: float,
+    overall_sentiment_label: str,
+    result_snapshot: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Insert a full analysis snapshot for a user."""
+    client = get_supabase_client()
+    row: Dict[str, Any] = {
+        "user_id": user_id,
+        "tickers": tickers,
+        "overall_sentiment_score": overall_sentiment_score,
+        "overall_sentiment_label": overall_sentiment_label,
+        "result_snapshot": result_snapshot,
+    }
+    response = client.table("analysis_history").insert(row).execute()
+    if not response.data:
+        raise RuntimeError("save_analysis_history: no data returned from Supabase insert")
+    return response.data[0]
+
+
+def get_analysis_history(user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """Return recent analyses for a user without the result_snapshot (too large for list view)."""
+    client = get_supabase_client()
+    response = (
+        client.table("analysis_history")
+        .select("id, tickers, overall_sentiment_score, overall_sentiment_label, created_at")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    return response.data or []
+
+
+def get_analysis_detail(analysis_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    """Return a single analysis including result_snapshot, verifying user ownership."""
+    client = get_supabase_client()
+    response = (
+        client.table("analysis_history")
+        .select("id, tickers, overall_sentiment_score, overall_sentiment_label, result_snapshot, created_at")
+        .eq("id", analysis_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if not response.data:
+        return None
+    return response.data[0]
