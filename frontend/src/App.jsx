@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Link } from "react-router-dom";
 import PortfolioInput from "./components/PortfolioInput.jsx";
 import TickerCard from "./components/TickerCard.jsx";
 import RiskSummary from "./components/RiskSummary.jsx";
@@ -250,6 +251,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            <Link
+              to="/changelog"
+              className="text-xs transition-colors hidden sm:block"
+              style={{ color: "rgba(100,116,139,0.7)" }}
+              onMouseEnter={(e) => (e.target.style.color = "rgba(148,163,184,0.9)")}
+              onMouseLeave={(e) => (e.target.style.color = "rgba(100,116,139,0.7)")}
+            >
+              Changelog
+            </Link>
             {appState === STATE.RESULTS && (
               <button onClick={handleReset} className="btn-outline-amber">
                 New Analysis
