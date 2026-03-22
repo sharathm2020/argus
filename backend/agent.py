@@ -20,7 +20,7 @@ from prompts.risk_narrative import (
     json_output_parser,
 )
 from job_store import job_store, JobStatus
-from db.supabase_client import write_sentiment_history
+from db.supabase_client import write_sentiment_history, save_analysis_history
 from sentiment_analyzer import analyze_sentiment
 from tools.dcf import calculate_dcf, fetch_risk_free_rate
 from tools.hedging import generate_hedging_suggestions, generate_options_hedge
@@ -62,6 +62,7 @@ async def analyze_ticker(
     llm: ChatOpenAI,
     model: str = MODEL_FULL,
     risk_free_rate: float = 0.043,
+    user_id: str | None = None,
 ) -> TickerRiskResult:
     """
     Run the risk narrative LLM call for a single ticker.
@@ -165,6 +166,7 @@ async def analyze_ticker(
             sentiment_label,
             confidence_score,
             sentiment,
+            user_id,
         )
     except Exception as exc:
         logger.warning("Supabase sentiment_history write failed for %s: %s", ticker, exc)
@@ -296,6 +298,7 @@ async def run_portfolio_analysis(
     stock_info: Dict[str, Dict[str, Any]],
     risk_factors: Dict[str, str],
     job_id: str,
+    user_id: str | None = None,
 ) -> PortfolioRiskResponse:
     """
     Orchestrate the full LLM analysis phase.
@@ -348,6 +351,7 @@ async def run_portfolio_analysis(
                     llm=_get_llm(model=MODEL_FULL),
                     model=MODEL_FULL,
                     risk_free_rate=risk_free_rate,
+                    user_id=user_id,
                 )
                 for ticker, weight in positions
             ]))
@@ -368,6 +372,7 @@ async def run_portfolio_analysis(
                     llm=_get_llm(model=MODEL_MINI),
                     model=MODEL_MINI,
                     risk_free_rate=risk_free_rate,
+                    user_id=user_id,
                 )
                 for ticker, weight in positions
             ]))
@@ -394,6 +399,7 @@ async def run_portfolio_analysis(
                         llm=_get_llm(model=MODEL_MINI),
                         model=MODEL_MINI,
                         risk_free_rate=risk_free_rate,
+                        user_id=user_id,
                     )
                     for ticker, weight in chunk
                 ])
@@ -441,6 +447,27 @@ async def run_portfolio_analysis(
             sector_concentration=sector_concentration,
             hedging_suggestions=hedging_suggestions,
         )
+
+        # ── Save analysis history for authenticated users ──────────────────
+        if user_id:
+            try:
+                if overall_sentiment > 0.2:
+                    sentiment_label_str = "positive"
+                elif overall_sentiment < -0.2:
+                    sentiment_label_str = "negative"
+                else:
+                    sentiment_label_str = "neutral"
+                await asyncio.to_thread(
+                    save_analysis_history,
+                    user_id,
+                    [r.ticker for r in results],
+                    round(overall_sentiment, 4),
+                    sentiment_label_str,
+                    response.model_dump(mode="json"),
+                )
+                logger.debug("Job %s — analysis history saved for user %s", job_id, user_id)
+            except Exception as exc:
+                logger.warning("Failed to save analysis history for job %s: %s", job_id, exc)
 
         # ── Phase 6: mark complete ────────────────────────────────────────
         job_store.update_job(

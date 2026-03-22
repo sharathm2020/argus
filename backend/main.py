@@ -14,13 +14,14 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from typing import Any, Dict, List as _List, Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
-from typing import List as _List
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from openai import AsyncOpenAI
+from pydantic import BaseModel
 
 # Load environment variables before importing any module that reads them
 load_dotenv()
@@ -28,10 +29,57 @@ load_dotenv()
 from agent import run_portfolio_analysis
 from job_store import JobResult, JobStatus, job_store
 from models.schemas import PortfolioRequest
-from db.supabase_client import query_sentiment_history
+from db.supabase_client import (
+    query_sentiment_history,
+    save_portfolio,
+    get_saved_portfolios,
+    delete_portfolio,
+    get_analysis_history,
+    get_analysis_detail,
+)
 from tools.edgar import clean_risk_factors_batch, fetch_risk_factors_batch
 from tools.news import fetch_news_batch, fetch_stock_info_batch
 from tools.portfolio import parse_portfolio
+
+
+# ── Request/response models ────────────────────────────────────────────────────
+
+class SavePortfolioRequest(BaseModel):
+    name: str
+    tickers: _List[str]
+    weights: Optional[Dict[str, float]] = None
+
+# ── JWT helper ────────────────────────────────────────────────────────────────
+
+def _extract_user_id(request: Request) -> Optional[str]:
+    """
+    Best-effort extraction of the Supabase user_id (sub claim) from an
+    Authorization: Bearer <token> header.
+
+    Decodes without signature verification — we trust Supabase issued the
+    token; we only need the sub claim to tag Supabase rows with the caller.
+    Returns None on any failure (missing header, malformed token, etc.).
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth[7:].strip()
+    try:
+        import jwt  # PyJWT
+        # algorithms must be specified in PyJWT 2.x even when skipping verification.
+        # verify_exp=False avoids failures on slightly-expired tokens.
+        payload = jwt.decode(
+            token,
+            algorithms=["HS256", "RS256"],
+            options={"verify_signature": False, "verify_exp": False},
+        )
+        user_id = payload.get("sub") or None
+        logger.debug("JWT extracted user_id=%s", user_id)
+        return user_id
+    except Exception as exc:
+        logger.warning("JWT decode failed — user_id will not be recorded: %s", exc)
+        return None
+
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -111,7 +159,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 # ── Background analysis pipeline ─────────────────────────────────────────────
 
-async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> None:
+async def _run_analysis_background(job_id: str, request: PortfolioRequest, user_id: Optional[str] = None) -> None:
     """
     Full data-fetch + LLM analysis pipeline, run as a FastAPI BackgroundTask.
 
@@ -154,6 +202,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> No
             stock_info=stock_info,
             risk_factors=risk_factors,
             job_id=job_id,
+            user_id=user_id,
         )
 
     except Exception as exc:
@@ -183,6 +232,7 @@ async def health_check():
 async def analyze_portfolio(
     request: PortfolioRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
 ):
     """
     Validate the portfolio, create a job, and immediately return a job_id.
@@ -194,12 +244,15 @@ async def analyze_portfolio(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Best-effort: extract Supabase user_id to tag sentiment_history rows
+    user_id = _extract_user_id(http_request)
+
     job_id = uuid.uuid4().hex
     job_store.create_job(job_id)
 
-    background_tasks.add_task(_run_analysis_background, job_id, request)
+    background_tasks.add_task(_run_analysis_background, job_id, request, user_id)
 
-    logger.info("Job %s created and queued.", job_id)
+    logger.info("Job %s created and queued (user_id=%s).", job_id, user_id or "anonymous")
     return {"job_id": job_id, "status": "pending"}
 
 
@@ -237,6 +290,84 @@ async def get_sentiment_history(ticker: str):
         logger.error("sentiment_history query failed for %s: %s", ticker_upper, exc)
         raise HTTPException(status_code=503, detail="Sentiment history temporarily unavailable.")
     return {"ticker": ticker_upper, "history": rows}
+
+
+# ── Saved portfolios ───────────────────────────────────────────────────────────
+
+@app.post("/api/portfolios", tags=["portfolios"], summary="Save a portfolio")
+async def create_portfolio(request: SavePortfolioRequest, http_request: Request):
+    user_id = _extract_user_id(http_request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        portfolio = await asyncio.to_thread(
+            save_portfolio, user_id, request.name, request.tickers, request.weights
+        )
+        return portfolio
+    except Exception as exc:
+        logger.error("Failed to save portfolio for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to save portfolio.")
+
+
+@app.get("/api/portfolios", tags=["portfolios"], summary="List saved portfolios")
+async def list_portfolios(http_request: Request):
+    user_id = _extract_user_id(http_request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        portfolios = await asyncio.to_thread(get_saved_portfolios, user_id)
+        return {"portfolios": portfolios}
+    except Exception as exc:
+        logger.error("Failed to fetch portfolios for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch portfolios.")
+
+
+@app.delete(
+    "/api/portfolios/{portfolio_id}",
+    tags=["portfolios"],
+    summary="Delete a saved portfolio",
+    status_code=204,
+)
+async def remove_portfolio(portfolio_id: str, http_request: Request):
+    user_id = _extract_user_id(http_request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        await asyncio.to_thread(delete_portfolio, portfolio_id, user_id)
+    except Exception as exc:
+        logger.error("Failed to delete portfolio %s: %s", portfolio_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to delete portfolio.")
+    return Response(status_code=204)
+
+
+# ── Analysis history ───────────────────────────────────────────────────────────
+
+@app.get("/api/history", tags=["history"], summary="List analysis history")
+async def list_analysis_history(http_request: Request):
+    user_id = _extract_user_id(http_request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        history = await asyncio.to_thread(get_analysis_history, user_id)
+        return {"history": history}
+    except Exception as exc:
+        logger.error("Failed to fetch analysis history for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch analysis history.")
+
+
+@app.get("/api/history/{analysis_id}", tags=["history"], summary="Get analysis detail with snapshot")
+async def get_analysis(analysis_id: str, http_request: Request):
+    user_id = _extract_user_id(http_request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    try:
+        detail = await asyncio.to_thread(get_analysis_detail, analysis_id, user_id)
+    except Exception as exc:
+        logger.error("Failed to fetch analysis %s: %s", analysis_id, exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch analysis.")
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+    return detail
 
 
 _PARSE_IMAGE_SYSTEM_PROMPT = (

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(mkdir -p \"C:/Users/Sharath Mahadevan/Downloads/argus/training/data\" && mkdir -p \"C:/Users/Sharath Mahadevan/Downloads/argus/backend/models/sentiment\")"
+      "Bash(mkdir -p \"C:/Users/Sharath Mahadevan/Downloads/argus/training/data\" && mkdir -p \"C:/Users/Sharath Mahadevan/Downloads/argus/backend/models/sentiment\")",
+      "Bash(cd:*)",
+      "Bash(grep:*)"
     ]
   }
 }
