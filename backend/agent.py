@@ -62,6 +62,7 @@ async def analyze_ticker(
     llm: ChatOpenAI,
     model: str = MODEL_FULL,
     risk_free_rate: float = 0.043,
+    user_id: str | None = None,
 ) -> TickerRiskResult:
     """
     Run the risk narrative LLM call for a single ticker.
@@ -165,6 +166,7 @@ async def analyze_ticker(
             sentiment_label,
             confidence_score,
             sentiment,
+            user_id,
         )
     except Exception as exc:
         logger.warning("Supabase sentiment_history write failed for %s: %s", ticker, exc)
@@ -296,6 +298,7 @@ async def run_portfolio_analysis(
     stock_info: Dict[str, Dict[str, Any]],
     risk_factors: Dict[str, str],
     job_id: str,
+    user_id: str | None = None,
 ) -> PortfolioRiskResponse:
     """
     Orchestrate the full LLM analysis phase.
@@ -348,6 +351,7 @@ async def run_portfolio_analysis(
                     llm=_get_llm(model=MODEL_FULL),
                     model=MODEL_FULL,
                     risk_free_rate=risk_free_rate,
+                    user_id=user_id,
                 )
                 for ticker, weight in positions
             ]))
@@ -368,6 +372,7 @@ async def run_portfolio_analysis(
                     llm=_get_llm(model=MODEL_MINI),
                     model=MODEL_MINI,
                     risk_free_rate=risk_free_rate,
+                    user_id=user_id,
                 )
                 for ticker, weight in positions
             ]))
@@ -394,6 +399,7 @@ async def run_portfolio_analysis(
                         llm=_get_llm(model=MODEL_MINI),
                         model=MODEL_MINI,
                         risk_free_rate=risk_free_rate,
+                        user_id=user_id,
                     )
                     for ticker, weight in chunk
                 ])

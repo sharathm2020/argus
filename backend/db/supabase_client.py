@@ -83,6 +83,7 @@ def write_sentiment_history(
         "sentiment_score": sentiment_score,
         "user_id": user_id,
     }
+    logger.debug("sentiment_history insert for %s — user_id=%s", ticker, user_id)
     client.table("sentiment_history").insert(row).execute()
     logger.debug("sentiment_history row written for %s", ticker)
 

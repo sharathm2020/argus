@@ -14,6 +14,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
@@ -32,6 +33,38 @@ from db.supabase_client import query_sentiment_history
 from tools.edgar import clean_risk_factors_batch, fetch_risk_factors_batch
 from tools.news import fetch_news_batch, fetch_stock_info_batch
 from tools.portfolio import parse_portfolio
+
+# ── JWT helper ────────────────────────────────────────────────────────────────
+
+def _extract_user_id(request: Request) -> Optional[str]:
+    """
+    Best-effort extraction of the Supabase user_id (sub claim) from an
+    Authorization: Bearer <token> header.
+
+    Decodes without signature verification — we trust Supabase issued the
+    token; we only need the sub claim to tag Supabase rows with the caller.
+    Returns None on any failure (missing header, malformed token, etc.).
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth[7:].strip()
+    try:
+        import jwt  # PyJWT
+        # algorithms must be specified in PyJWT 2.x even when skipping verification.
+        # verify_exp=False avoids failures on slightly-expired tokens.
+        payload = jwt.decode(
+            token,
+            algorithms=["HS256", "RS256"],
+            options={"verify_signature": False, "verify_exp": False},
+        )
+        user_id = payload.get("sub") or None
+        logger.debug("JWT extracted user_id=%s", user_id)
+        return user_id
+    except Exception as exc:
+        logger.warning("JWT decode failed — user_id will not be recorded: %s", exc)
+        return None
+
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -111,7 +144,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 # ── Background analysis pipeline ─────────────────────────────────────────────
 
-async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> None:
+async def _run_analysis_background(job_id: str, request: PortfolioRequest, user_id: Optional[str] = None) -> None:
     """
     Full data-fetch + LLM analysis pipeline, run as a FastAPI BackgroundTask.
 
@@ -154,6 +187,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest) -> No
             stock_info=stock_info,
             risk_factors=risk_factors,
             job_id=job_id,
+            user_id=user_id,
         )
 
     except Exception as exc:
@@ -183,6 +217,7 @@ async def health_check():
 async def analyze_portfolio(
     request: PortfolioRequest,
     background_tasks: BackgroundTasks,
+    http_request: Request,
 ):
     """
     Validate the portfolio, create a job, and immediately return a job_id.
@@ -194,12 +229,15 @@ async def analyze_portfolio(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Best-effort: extract Supabase user_id to tag sentiment_history rows
+    user_id = _extract_user_id(http_request)
+
     job_id = uuid.uuid4().hex
     job_store.create_job(job_id)
 
-    background_tasks.add_task(_run_analysis_background, job_id, request)
+    background_tasks.add_task(_run_analysis_background, job_id, request, user_id)
 
-    logger.info("Job %s created and queued.", job_id)
+    logger.info("Job %s created and queued (user_id=%s).", job_id, user_id or "anonymous")
     return {"job_id": job_id, "status": "pending"}
 
 
