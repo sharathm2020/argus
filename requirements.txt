@@ -30,5 +30,6 @@ huggingface_hub==0.23.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
 supabase
+PyJWT==2.9.0
 
 # ── Note: uuid and asyncio are Python stdlib — no install required ─────────────

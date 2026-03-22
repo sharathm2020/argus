@@ -3,6 +3,9 @@ import PortfolioInput from "./components/PortfolioInput.jsx";
 import TickerCard from "./components/TickerCard.jsx";
 import RiskSummary from "./components/RiskSummary.jsx";
 import HedgingSuggestions from "./components/HedgingSuggestions.jsx";
+import AuthModal from "./components/AuthModal.jsx";
+import { useAuth } from "./context/AuthContext.jsx";
+import { isAuthEnabled } from "./lib/supabaseClient.js";
 
 // Application state machine states
 const STATE = {
@@ -53,10 +56,29 @@ function LoadingView({ statusMessage }) {
 }
 
 export default function App() {
+  const { user, session, signOut } = useAuth();
+
   const [appState, setAppState]       = useState(STATE.IDLE);
   const [analysisData, setAnalysisData] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+
+  // Auth modal
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  // Nudge banner: shown once per session after first analysis completes (logged-out only)
+  const [nudgeDismissed, setNudgeDismissed] = useState(
+    () => sessionStorage.getItem("argus_nudge_dismissed") === "1"
+  );
+
+  // Ephemeral toast for feature stubs
+  const [toastMessage, setToastMessage] = useState("");
+  const toastTimerRef = useRef(null);
+  function showFeatureToast(msg) {
+    setToastMessage(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMessage(""), 3000);
+  }
 
   // Refs so interval callbacks always see fresh values without re-creating the interval
   const pollIntervalRef    = useRef(null);
@@ -87,9 +109,13 @@ export default function App() {
     // ── Step 1: submit job ────────────────────────────────────────────────
     let jobId;
     try {
+      // Attach Bearer token when user is signed in
+      const headers = { "Content-Type": "application/json" };
+      if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+
       const response = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(portfolioPayload),
       });
 
@@ -185,11 +211,37 @@ export default function App() {
             </div>
           </div>
 
-          {appState === STATE.RESULTS && (
-            <button onClick={handleReset} className="btn-outline-amber">
-              New Analysis
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {appState === STATE.RESULTS && (
+              <button onClick={handleReset} className="btn-outline-amber">
+                New Analysis
+              </button>
+            )}
+            {isAuthEnabled && (
+              user ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400 hidden sm:block" style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {user.email}
+                  </span>
+                  <button
+                    onClick={signOut}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                    style={{ color: "rgba(148,163,184,0.7)", border: "1px solid rgba(71,85,105,0.4)", background: "transparent" }}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAuthModalOpen(true)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                  style={{ color: "#F59E0B", border: "1px solid rgba(245,158,11,0.3)", background: "rgba(245,158,11,0.08)" }}
+                >
+                  Sign In
+                </button>
+              )
+            )}
+          </div>
         </div>
       </header>
 
@@ -245,11 +297,78 @@ export default function App() {
         {/* Results */}
         {appState === STATE.RESULTS && analysisData && (
           <div className="animate-fade-in-up">
+            {/* ── Sign-in nudge banner (logged-out users, once per session) ── */}
+            {isAuthEnabled && !user && !nudgeDismissed && (
+              <div
+                className="flex items-start gap-4 rounded-lg px-5 py-4 mb-6 animate-fade-in-up"
+                style={{
+                  background: "rgba(245,158,11,0.06)",
+                  borderLeft: "4px solid #F59E0B",
+                  border: "1px solid rgba(245,158,11,0.2)",
+                  borderLeftWidth: "4px",
+                }}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-100 mb-0.5">Save your analysis history</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Sign in to track sentiment changes over time and save portfolios for quick re-analysis.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 mt-0.5">
+                  <button
+                    onClick={() => setAuthModalOpen(true)}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                    style={{ color: "#F59E0B", border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.12)" }}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNudgeDismissed(true);
+                      sessionStorage.setItem("argus_nudge_dismissed", "1");
+                    }}
+                    className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1"
+                    aria-label="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-slate-100">Risk Analysis Results</h2>
-              <span className="text-xs text-slate-500/70 mono">
-                {analysisData.results.length} position{analysisData.results.length !== 1 ? "s" : ""}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500/70 mono">
+                  {analysisData.results.length} position{analysisData.results.length !== 1 ? "s" : ""}
+                </span>
+                {/* Feature gate stubs */}
+                {isAuthEnabled && (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (!user) { setAuthModalOpen(true); return; }
+                        // coming soon
+                        showFeatureToast("Portfolio saving coming soon.");
+                      }}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                      style={{ color: "rgba(148,163,184,0.6)", border: "1px solid rgba(71,85,105,0.35)", background: "transparent" }}
+                    >
+                      Save Portfolio
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!user) { setAuthModalOpen(true); return; }
+                        showFeatureToast("Portfolio history coming soon.");
+                      }}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                      style={{ color: "rgba(148,163,184,0.6)", border: "1px solid rgba(71,85,105,0.35)", background: "transparent" }}
+                    >
+                      History
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Per-ticker cards — responsive 2-column grid */}
@@ -277,6 +396,23 @@ export default function App() {
           <span>For informational purposes only. Not financial advice.</span>
         </div>
       </footer>
+
+      {/* ── Auth modal ──────────────────────────────────────────────────── */}
+      <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+
+      {/* ── Feature-stub toast ──────────────────────────────────────────── */}
+      {toastMessage && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-lg text-sm font-medium text-slate-100 animate-fade-in-up"
+          style={{
+            background: "#1e293b",
+            border: "1px solid rgba(71,85,105,0.5)",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+          }}
+        >
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }
