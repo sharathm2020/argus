@@ -170,7 +170,14 @@ async def generate_hedging_suggestions(
         ])
 
         raw = _strip_fences(response.content)
-        parsed = json.loads(raw)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as json_exc:
+            logger.warning(
+                "Hedging JSON parse failed. Raw response: %s",
+                raw[:500],
+            )
+            raise json_exc
 
         # Validate expected keys are present
         if "ticker_hedges" not in parsed or "portfolio_recommendations" not in parsed:
