@@ -175,7 +175,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest, user_
         job_store.update_job(job_id, JobStatus.PROCESSING, "Fetching latest news and market data...", progress=5)
 
         news_data, stock_info = await asyncio.gather(
-            asyncio.to_thread(fetch_news_batch, tickers),
+            fetch_news_batch(tickers),
             asyncio.to_thread(fetch_stock_info_batch, tickers),
         )
 

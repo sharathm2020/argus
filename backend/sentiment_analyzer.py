@@ -7,8 +7,9 @@ Subsequent calls reuse the loaded singleton — startup time is not affected.
 
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 
 from huggingface_hub import hf_hub_download
 import shutil
@@ -146,3 +147,103 @@ def analyze_sentiment(text: str) -> Dict:
     all_scores = {id2label[i]: float(probs[i].item()) for i in range(len(probs))}
 
     return {"label": label, "score": score, "all_scores": all_scores}
+
+
+# ── Recency-confidence weighted aggregation (ARG-55) ─────────────────────────
+
+def _recency_weight(published_at: Optional[str]) -> float:
+    """
+    Map article age to a recency weight (0.1 – 1.0).
+
+    Age brackets:
+        0–6 h   → 1.0
+        6–24 h  → 0.8
+        1–3 d   → 0.5
+        3–7 d   → 0.3
+        7+ d    → 0.1
+        unknown → 0.5  (moderate default)
+    """
+    if not published_at:
+        return 0.5
+    try:
+        dt = datetime.fromisoformat(published_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+        if age_hours < 6:    return 1.0
+        if age_hours < 24:   return 0.8
+        if age_hours < 72:   return 0.5   # 1–3 days
+        if age_hours < 168:  return 0.3   # 3–7 days
+        return 0.1
+    except Exception:
+        return 0.5
+
+
+def compute_weighted_sentiment(
+    ticker: str,
+    scored_headlines: List[Dict],
+) -> Tuple[float, Optional[float], str]:
+    """
+    ARG-55: Compute a recency-confidence weighted sentiment score.
+
+    Each item in *scored_headlines* must have:
+        headline     (str)
+        published_at (str | None)   ISO 8601 UTC timestamp
+        score        (float)        signed score: +conf / -conf / 0
+        confidence   (float)        raw DistilBERT confidence (0–1)
+        label        (str)          "positive" | "negative" | "neutral" | "mixed"
+
+    Weight formula:
+        weight_i = recency_weight(published_at_i) * confidence_i
+
+    Weighted score:
+        sum(weight_i * score_i) / sum(weight_i)
+
+    Fallback: if sum of weights is zero, returns a simple mean.
+
+    Returns:
+        (weighted_score, weighted_confidence, derived_label)
+    """
+    if not scored_headlines:
+        return 0.0, None, "neutral"
+
+    weights: List[float] = []
+    for h in scored_headlines:
+        recency = _recency_weight(h.get("published_at"))
+        conf    = float(h.get("confidence", 0.5))
+        weights.append(recency * conf)
+
+    weight_sum = sum(weights)
+
+    if weight_sum > 0:
+        weighted_score = sum(
+            w * float(h["score"]) for w, h in zip(weights, scored_headlines)
+        ) / weight_sum
+        weighted_conf  = sum(
+            w * float(h["confidence"]) for w, h in zip(weights, scored_headlines)
+        ) / weight_sum
+    else:
+        # Fallback: simple average
+        scores = [float(h["score"]) for h in scored_headlines]
+        confs  = [float(h.get("confidence", 0.5)) for h in scored_headlines]
+        weighted_score = sum(scores) / len(scores)
+        weighted_conf  = sum(confs)  / len(confs)
+
+    weighted_score = max(-1.0, min(1.0, weighted_score))
+
+    if weighted_score > 0.2:
+        derived_label = "positive"
+    elif weighted_score < -0.2:
+        derived_label = "negative"
+    else:
+        derived_label = "neutral"
+
+    logger.debug(
+        "Weighted sentiment for %s: %d headlines, effective weight sum: %.2f, score: %.3f",
+        ticker,
+        len(scored_headlines),
+        weight_sum,
+        weighted_score,
+    )
+
+    return weighted_score, round(weighted_conf, 4), derived_label
