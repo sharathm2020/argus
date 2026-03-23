@@ -28,6 +28,7 @@ from tools.portfolio_analysis import calculate_sector_concentration
 from utils.asset_classifier import classify_ticker
 from data.coingecko_client import get_crypto_data
 from data.comps_client import calculate_comps
+from data.correlation_client import compute_correlation_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -319,6 +320,41 @@ async def generate_portfolio_summary(
     return summary.strip()
 
 
+# ── Portfolio-level metrics ───────────────────────────────────────────────────
+
+def _compute_portfolio_beta(results: List[TickerRiskResult]) -> float:
+    """
+    ARG-53: Compute weighted-average portfolio beta.
+
+    Beta source per ticker type:
+      equity — from dcf_data.inputs.beta (CAPM-derived, falls back to 1.0)
+      ETF    — 1.0 (market proxy)
+      crypto — 1.5 (high-volatility proxy)
+      other  — 1.0
+    """
+    total = 0.0
+    for r in results:
+        if r.asset_type == "crypto":
+            beta = 1.5
+        elif r.asset_type == "etf":
+            beta = 1.0
+        else:
+            beta = 1.0  # default for equity / unknown
+            if (
+                r.dcf_data
+                and r.dcf_data.get("available")
+                and r.dcf_data.get("inputs")
+            ):
+                raw_beta = r.dcf_data["inputs"].get("beta")
+                if raw_beta is not None:
+                    try:
+                        beta = float(raw_beta)
+                    except (TypeError, ValueError):
+                        beta = 1.0
+        total += r.weight * beta
+    return round(total, 2)
+
+
 # ── Main orchestrator ─────────────────────────────────────────────────────────
 
 async def run_portfolio_analysis(
@@ -447,22 +483,61 @@ async def run_portfolio_analysis(
         # ── Sector concentration ──────────────────────────────────────────
         sector_concentration = calculate_sector_concentration(results)
 
-        # ── Phase 5b: hedging suggestions (sequential — depends on all results) ──
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...", progress=90)
-        if n_tickers > SMALL_PORTFOLIO_THRESHOLD:
+        # ── ARG-53: beta-weighted portfolio exposure ───────────────────────
+        portfolio_beta = _compute_portfolio_beta(results)
+
+        # ── Phase 5b: hedging + correlation matrix in parallel ────────────
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions and risk metrics...", progress=88)
+
+        if n_tickers > 6:
             hedging_tickers = select_top_risk_tickers(results, n=5)
             logger.info(
-                "Job %s — large portfolio: selecting top 5 risk tickers for hedging: %s",
+                "Job %s — portfolio >6 tickers: selecting top 5 risk tickers for hedging: %s",
                 job_id,
                 [r.ticker for r in hedging_tickers],
             )
         else:
             hedging_tickers = results
-        hedging_suggestions = await generate_hedging_suggestions(
-            ticker_results=hedging_tickers,
-            sector_concentration=sector_concentration,
-            overall_sentiment=overall_sentiment,
+
+        weights_dict = {ticker: weight for ticker, weight in positions}
+        all_tickers = [ticker for ticker, _ in positions]
+
+        hedging_suggestions_raw, corr_result = await asyncio.gather(
+            generate_hedging_suggestions(
+                ticker_results=hedging_tickers,
+                sector_concentration=sector_concentration,
+                overall_sentiment=overall_sentiment,
+            ),
+            compute_correlation_matrix(all_tickers, weights=weights_dict),
+            return_exceptions=True,
         )
+
+        if isinstance(hedging_suggestions_raw, Exception):
+            logger.warning("Job %s — hedging failed: %s", job_id, hedging_suggestions_raw)
+            hedging_suggestions = None
+        else:
+            hedging_suggestions = hedging_suggestions_raw
+
+        if isinstance(corr_result, Exception):
+            logger.warning("Job %s — correlation matrix failed: %s", job_id, corr_result)
+            corr_result = None
+
+        # ── ARG-54 / ARG-59: extract correlation and VaR fields ───────────
+        correlation_matrix = None
+        var_95 = None
+        var_99 = None
+        portfolio_volatility = None
+        annualized_volatility = None
+
+        if corr_result and isinstance(corr_result, dict):
+            correlation_matrix = {
+                "tickers": corr_result.get("tickers"),
+                "matrix":  corr_result.get("matrix"),
+            }
+            var_95                = corr_result.get("var_95")
+            var_99                = corr_result.get("var_99")
+            portfolio_volatility  = corr_result.get("portfolio_volatility")
+            annualized_volatility = corr_result.get("annualized_volatility")
 
         response = PortfolioRiskResponse(
             results=results,
@@ -470,6 +545,12 @@ async def run_portfolio_analysis(
             overall_sentiment=round(overall_sentiment, 4),
             sector_concentration=sector_concentration,
             hedging_suggestions=hedging_suggestions,
+            portfolio_beta=portfolio_beta,
+            correlation_matrix=correlation_matrix,
+            var_95=var_95,
+            var_99=var_99,
+            portfolio_volatility=portfolio_volatility,
+            annualized_volatility=annualized_volatility,
         )
 
         # ── Save analysis history for authenticated users ──────────────────

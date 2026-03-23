@@ -68,3 +68,12 @@ class PortfolioRiskResponse(BaseModel):
     overall_sentiment: float                      # Weighted average of individual sentiment scores
     sector_concentration: Optional[dict] = None  # Sector breakdown + concentration flags
     hedging_suggestions: Optional[dict] = None   # GPT-4o hedging recommendations
+    # ARG-53: beta-weighted portfolio exposure
+    portfolio_beta: Optional[float] = None
+    # ARG-54: pairwise return correlation matrix
+    correlation_matrix: Optional[dict] = None
+    # ARG-59: parametric Value at Risk
+    var_95: Optional[float] = None
+    var_99: Optional[float] = None
+    portfolio_volatility: Optional[float] = None
+    annualized_volatility: Optional[float] = None

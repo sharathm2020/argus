@@ -186,8 +186,15 @@ function StatCell({ label, value, valueStyle }) {
  * Props:
  *   result — TickerRiskResult object from the API response
  */
-export default function TickerCard({ result }) {
+export default function TickerCard({ result, isAdvanced = false }) {
   const [activeTab, setActiveTab] = useState("risk");
+
+  // If advanced mode is turned off while DCF tab is active, fall back to risk
+  React.useEffect(() => {
+    if (!isAdvanced && activeTab === "dcf") {
+      setActiveTab("risk");
+    }
+  }, [isAdvanced, activeTab]);
   const [newsExpanded, setNewsExpanded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [edgarExpanded, setEdgarExpanded] = useState(false);
@@ -323,7 +330,7 @@ export default function TickerCard({ result }) {
       >
         {[
           { id: "risk",  label: "Risk Analysis" },
-          { id: "dcf",   label: "DCF Valuation" },
+          ...(isAdvanced ? [{ id: "dcf", label: "DCF Valuation" }] : []),
           ...(showCompsTab ? [{ id: "comps", label: "Comps" }] : []),
           { id: "trend", label: "Sentiment Trend" },
         ].map(({ id, label }) => (
