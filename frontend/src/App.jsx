@@ -53,6 +53,19 @@ export default function App() {
     () => sessionStorage.getItem("argus_nudge_dismissed") === "1"
   );
 
+  // Advanced / Basic view toggle (persists in sessionStorage, resets on new analysis)
+  const [isAdvanced, setIsAdvanced] = useState(
+    () => sessionStorage.getItem("argus_advanced_view") === "1"
+  );
+
+  function toggleAdvanced() {
+    setIsAdvanced((v) => {
+      const next = !v;
+      sessionStorage.setItem("argus_advanced_view", next ? "1" : "0");
+      return next;
+    });
+  }
+
   // PDF export
   const [pdfExporting, setPdfExporting] = useState(false);
 
@@ -117,6 +130,8 @@ export default function App() {
     setAnalysisData(null);
     setStatusMessage("");
     setProgress(0);
+    setIsAdvanced(false);
+    sessionStorage.setItem("argus_advanced_view", "0");
 
     // ── Step 1: submit job ────────────────────────────────────────────────
     let jobId;
@@ -413,6 +428,20 @@ export default function App() {
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-slate-100">Risk Analysis Results</h2>
               <div className="flex items-center gap-3">
+                {/* Basic / Advanced toggle */}
+                <button
+                  onClick={toggleAdvanced}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  style={{
+                    color: isAdvanced ? "#94a3b8" : "rgba(148,163,184,0.55)",
+                    border: isAdvanced
+                      ? "1px solid rgba(71,85,105,0.55)"
+                      : "1px solid rgba(71,85,105,0.3)",
+                    background: "transparent",
+                  }}
+                >
+                  {isAdvanced ? "📊 Basic View" : "🔬 Advanced View"}
+                </button>
                 <span className="text-xs text-slate-500/70 mono">
                   {analysisData.results.length} position{analysisData.results.length !== 1 ? "s" : ""}
                 </span>
@@ -457,7 +486,7 @@ export default function App() {
             {/* Per-ticker cards — responsive 2-column grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch mb-6">
               {analysisData.results.map((result) => (
-                <TickerCard key={result.ticker} result={result} />
+                <TickerCard key={result.ticker} result={result} isAdvanced={isAdvanced} />
               ))}
             </div>
 
@@ -466,6 +495,12 @@ export default function App() {
               summary={analysisData.portfolio_summary}
               overallSentiment={analysisData.overall_sentiment}
               sectorConcentration={analysisData.sector_concentration}
+              portfolioBeta={analysisData.portfolio_beta}
+              correlationMatrix={analysisData.correlation_matrix}
+              var95={analysisData.var_95}
+              var99={analysisData.var_99}
+              annualizedVolatility={analysisData.annualized_volatility}
+              isAdvanced={isAdvanced}
             />
             <HedgingSuggestions hedgingSuggestions={analysisData.hedging_suggestions} results={analysisData.results} />
           </div>
