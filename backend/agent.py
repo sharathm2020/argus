@@ -21,7 +21,7 @@ from prompts.risk_narrative import (
 )
 from job_store import job_store, JobStatus
 from db.supabase_client import write_sentiment_history, save_analysis_history
-from sentiment_analyzer import analyze_sentiment
+from sentiment_analyzer import analyze_sentiment, compute_weighted_sentiment
 from tools.dcf import calculate_dcf, fetch_risk_free_rate, compute_sensitivity_table
 from tools.hedging import generate_hedging_suggestions, generate_options_hedge
 from tools.portfolio_analysis import calculate_sector_concentration
@@ -57,7 +57,7 @@ def _get_llm(temperature: float = 0.2, model: str = MODEL_FULL) -> ChatOpenAI:
 async def analyze_ticker(
     ticker: str,
     weight: float,
-    news_headlines: List[str],
+    news_articles: List[Dict[str, Any]],
     stock_info: Dict[str, Any],
     risk_factors: str,
     llm: ChatOpenAI,
@@ -71,6 +71,9 @@ async def analyze_ticker(
     On LLM failure, returns a safe placeholder result so one bad ticker
     never aborts the entire job.
     """
+    # Extract headline strings from article dicts (used for LLM prompt + display)
+    news_headlines: List[str] = [a["headline"] for a in news_articles]
+
     sector = stock_info.get("sector", "Unknown")
     market_cap = stock_info.get("market_cap")
     current_price: float | None = stock_info.get("current_price")
@@ -164,29 +167,75 @@ async def analyze_ticker(
         logger.warning("DCF calculation failed for %s: %s", ticker, dcf_data)
         dcf_data = {"available": False, "reason": "Calculation error"}
 
-    # ── Sentiment via DistilBERT (falls back to GPT-4o output on error) ───────
-    sentiment_text = " ".join(news_headlines) if news_headlines else risk_factors[:512]
+    # ── ARG-55: Per-headline DistilBERT scoring + weighted aggregation ───────
+    sentiment: float
     confidence_score: float | None = None
     sentiment_label: str | None = None
-    try:
-        sentiment_result = analyze_sentiment(sentiment_text)
-        label = sentiment_result["label"]
-        sentiment_label = label
-        confidence_score = sentiment_result["score"]
-        # Map categorical label → signed float in [-1, 1]
-        if label == "positive":
-            sentiment = confidence_score
-        elif label == "negative":
-            sentiment = -confidence_score
-        else:
-            sentiment = 0.0
-    except Exception as exc:
-        logger.warning(
-            "DistilBERT sentiment failed for %s (%s) — falling back to GPT-4o score.",
-            ticker, exc,
-        )
-        sentiment = float(parsed.get("sentiment_score", 0.0))
-        sentiment = max(-1.0, min(1.0, sentiment))
+
+    scored_headlines: List[Dict[str, Any]] = []
+    for article in news_articles:
+        try:
+            sr  = analyze_sentiment(article["headline"])
+            conf = sr["score"]
+            lbl  = sr["label"]
+            if lbl == "positive":
+                score = conf
+            elif lbl == "negative":
+                score = -conf
+            else:
+                score = 0.0
+            scored_headlines.append({
+                "headline":     article["headline"],
+                "published_at": article.get("published_at"),
+                "score":        score,
+                "confidence":   conf,
+                "label":        lbl,
+            })
+        except Exception as exc:
+            logger.warning(
+                "Sentiment inference failed for a headline of %s: %s", ticker, exc
+            )
+
+    if scored_headlines:
+        try:
+            sentiment, confidence_score, sentiment_label = compute_weighted_sentiment(
+                ticker, scored_headlines
+            )
+        except Exception as exc:
+            logger.warning(
+                "Weighted sentiment aggregation failed for %s (%s) — using simple average.",
+                ticker, exc,
+            )
+            scores = [h["score"] for h in scored_headlines]
+            sentiment = sum(scores) / len(scores)
+            sentiment = max(-1.0, min(1.0, sentiment))
+            sentiment_label = (
+                "positive" if sentiment > 0.2
+                else "negative" if sentiment < -0.2
+                else "neutral"
+            )
+    else:
+        # No headlines — fall back to risk factors text, then GPT-4o score
+        fallback_text = risk_factors[:512] if risk_factors else ""
+        try:
+            if not fallback_text:
+                raise ValueError("No text available for sentiment analysis")
+            sr = analyze_sentiment(fallback_text)
+            sentiment_label  = sr["label"]
+            confidence_score = sr["score"]
+            if sentiment_label == "positive":
+                sentiment = confidence_score
+            elif sentiment_label == "negative":
+                sentiment = -confidence_score
+            else:
+                sentiment = 0.0
+        except Exception as exc:
+            logger.warning(
+                "DistilBERT sentiment failed for %s (%s) — falling back to GPT-4o score.",
+                ticker, exc,
+            )
+            sentiment = float(parsed.get("sentiment_score", 0.0))
+            sentiment = max(-1.0, min(1.0, sentiment))
 
     # ── Persist sentiment to Supabase (non-blocking, never breaks analysis) ──
     try:
@@ -407,7 +456,7 @@ async def run_portfolio_analysis(
             result = await analyze_ticker(
                 ticker=ticker,
                 weight=weight,
-                news_headlines=news_data.get(ticker, []),
+                news_articles=news_data.get(ticker, []),
                 stock_info=stock_info.get(ticker, {}),
                 risk_factors=risk_factors.get(ticker, ""),
                 llm=_get_llm(model=model),
