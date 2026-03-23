@@ -1,5 +1,5 @@
 # ── Stage 1: build the React app ─────────────────────────────────────────
-FROM node:18-slim AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 # Install dependencies (cached unless package*.json changes)
 COPY package*.json ./
