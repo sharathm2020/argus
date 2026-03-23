@@ -172,7 +172,7 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest, user_
         logger.info("Job %s — tickers: %s", job_id, tickers)
 
         # ── Phase 1: news + stock fundamentals (run in parallel) ────────────
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Fetching latest news and headlines...")
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Fetching latest news and market data...", progress=5)
 
         news_data, stock_info = await asyncio.gather(
             asyncio.to_thread(fetch_news_batch, tickers),
@@ -180,13 +180,13 @@ async def _run_analysis_background(job_id: str, request: PortfolioRequest, user_
         )
 
         # ── Phase 2: SEC EDGAR 10-K filings ─────────────────────────────────
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Downloading SEC 10-K filings from EDGAR...")
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Downloading SEC 10-K filings from EDGAR...", progress=25)
 
         risk_factors = await asyncio.to_thread(fetch_risk_factors_batch, tickers)
         risk_factors = await clean_risk_factors_batch(risk_factors)
 
         # ── Phase 3: signal extraction complete — hand off to agent ─────────
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Extracting risk factors from filings...")
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Extracting risk factors from filings...", progress=38)
 
         logger.info(
             "Job %s — data ready: %d headlines, %d filings",

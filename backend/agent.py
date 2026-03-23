@@ -336,23 +336,36 @@ async def run_portfolio_analysis(
         logger.info("Job %s — risk-free rate: %.4f", job_id, risk_free_rate)
 
         # ── Phase 4: per-ticker LLM calls ────────────────────────────────
+        completed = [0]
+
+        async def _analyze_with_progress(ticker: str, weight: float, model: str) -> TickerRiskResult:
+            result = await analyze_ticker(
+                ticker=ticker,
+                weight=weight,
+                news_headlines=news_data.get(ticker, []),
+                stock_info=stock_info.get(ticker, {}),
+                risk_factors=risk_factors.get(ticker, ""),
+                llm=_get_llm(model=model),
+                model=model,
+                risk_free_rate=risk_free_rate,
+                user_id=user_id,
+            )
+            completed[0] += 1
+            pct = 40 + int(completed[0] / n_tickers * 40)
+            job_store.update_job_progress(
+                job_id, pct,
+                f"Analyzed {completed[0]}/{n_tickers} position{'s' if n_tickers != 1 else ''}..."
+            )
+            return result
+
         if strategy == "full":
             job_store.update_job(
                 job_id, JobStatus.PROCESSING,
                 f"Analyzing {n_tickers} positions with GPT-4o...",
+                progress=40,
             )
             results: List[TickerRiskResult] = list(await asyncio.gather(*[
-                analyze_ticker(
-                    ticker=ticker,
-                    weight=weight,
-                    news_headlines=news_data.get(ticker, []),
-                    stock_info=stock_info.get(ticker, {}),
-                    risk_factors=risk_factors.get(ticker, ""),
-                    llm=_get_llm(model=MODEL_FULL),
-                    model=MODEL_FULL,
-                    risk_free_rate=risk_free_rate,
-                    user_id=user_id,
-                )
+                _analyze_with_progress(ticker, weight, MODEL_FULL)
                 for ticker, weight in positions
             ]))
             summary_model = MODEL_FULL
@@ -361,19 +374,10 @@ async def run_portfolio_analysis(
             job_store.update_job(
                 job_id, JobStatus.PROCESSING,
                 f"Analyzing {n_tickers} positions with optimized model routing...",
+                progress=40,
             )
             results = list(await asyncio.gather(*[
-                analyze_ticker(
-                    ticker=ticker,
-                    weight=weight,
-                    news_headlines=news_data.get(ticker, []),
-                    stock_info=stock_info.get(ticker, {}),
-                    risk_factors=risk_factors.get(ticker, ""),
-                    llm=_get_llm(model=MODEL_MINI),
-                    model=MODEL_MINI,
-                    risk_free_rate=risk_free_rate,
-                    user_id=user_id,
-                )
+                _analyze_with_progress(ticker, weight, MODEL_MINI)
                 for ticker, weight in positions
             ]))
             summary_model = MODEL_FULL
@@ -382,6 +386,7 @@ async def run_portfolio_analysis(
             job_store.update_job(
                 job_id, JobStatus.PROCESSING,
                 f"Analyzing {n_tickers} positions in parallel batches...",
+                progress=40,
             )
             chunk_size = 10
             chunks = [
@@ -390,17 +395,7 @@ async def run_portfolio_analysis(
             ]
             chunk_results = await asyncio.gather(*[
                 asyncio.gather(*[
-                    analyze_ticker(
-                        ticker=ticker,
-                        weight=weight,
-                        news_headlines=news_data.get(ticker, []),
-                        stock_info=stock_info.get(ticker, {}),
-                        risk_factors=risk_factors.get(ticker, ""),
-                        llm=_get_llm(model=MODEL_MINI),
-                        model=MODEL_MINI,
-                        risk_free_rate=risk_free_rate,
-                        user_id=user_id,
-                    )
+                    _analyze_with_progress(ticker, weight, MODEL_MINI)
                     for ticker, weight in chunk
                 ])
                 for chunk in chunks
@@ -410,7 +405,7 @@ async def run_portfolio_analysis(
             summary_model = MODEL_FULL
 
         # ── Phase 5: portfolio summary ────────────────────────────────────
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Synthesizing portfolio-level summary...")
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Synthesizing portfolio-level summary...", progress=82)
 
         portfolio_summary = await generate_portfolio_summary(
             results, llm=_get_llm(model=summary_model), model=summary_model
@@ -424,7 +419,7 @@ async def run_portfolio_analysis(
         sector_concentration = calculate_sector_concentration(results)
 
         # ── Phase 5b: hedging suggestions (sequential — depends on all results) ──
-        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...")
+        job_store.update_job(job_id, JobStatus.PROCESSING, "Generating hedging suggestions...", progress=90)
         if n_tickers > SMALL_PORTFOLIO_THRESHOLD:
             hedging_tickers = select_top_risk_tickers(results, n=5)
             logger.info(
@@ -475,6 +470,7 @@ async def run_portfolio_analysis(
             JobStatus.COMPLETE,
             "Analysis complete.",
             results=response,
+            progress=100,
         )
         logger.info("Job %s complete — overall sentiment: %.3f", job_id, overall_sentiment)
         return response

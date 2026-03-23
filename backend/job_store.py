@@ -39,6 +39,8 @@ class JobResult(BaseModel):
     status: JobStatus
     # Human-readable description of the current step (empty string when pending)
     status_message: str = ""
+    # 0–100 integer progress for the loading screen
+    progress: int = 0
     # Populated only when status == COMPLETE
     results: Optional[PortfolioRiskResponse] = None
     # Populated only when status == FAILED
@@ -72,6 +74,7 @@ class JobStore:
         status_message: str,
         results: Optional[PortfolioRiskResponse] = None,
         error: Optional[str] = None,
+        progress: Optional[int] = None,
     ) -> None:
         """Update an existing job in place. No-op if job_id is unknown."""
         job = self._store.get(job_id)
@@ -84,7 +87,17 @@ class JobStore:
             job.results = results
         if error is not None:
             job.error = error
+        if progress is not None:
+            job.progress = progress
         logger.debug("Job %s → %s | %s", job_id, status, status_message)
+
+    def update_job_progress(self, job_id: str, progress: int, status_message: str) -> None:
+        """Lightweight helper — update progress and status_message without changing status."""
+        job = self._store.get(job_id)
+        if job is None:
+            return
+        job.progress = progress
+        job.status_message = status_message
 
     def get_job(self, job_id: str) -> Optional[JobResult]:
         """Return the job or None if not found / already expired."""

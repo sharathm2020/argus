@@ -1,6 +1,75 @@
-import React, { useState } from "react";
-import SentimentTrendModal from "./SentimentTrendModal";
+import React, { useState, useEffect } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+} from "recharts";
 import CompsView from "./CompsView";
+
+// ── Sentiment trend helpers ────────────────────────────────────────────────────
+
+const RANGE_OPTIONS = [
+  { label: "7d",  days: 7  },
+  { label: "30d", days: 30 },
+  { label: "All", days: null },
+];
+
+function filterByDays(history, days) {
+  if (!days) return history;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  return history.filter((row) => new Date(row.analyzed_at) >= cutoff);
+}
+
+function formatDate(isoString) {
+  const d = new Date(isoString);
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${date} ${time}`;
+}
+
+function scoreColor(score) {
+  if (score > 0.2)  return "#4ade80";
+  if (score < -0.2) return "#f87171";
+  return "#F59E0B";
+}
+
+function TrendTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  return (
+    <div
+      className="rounded-lg px-3 py-2 text-xs"
+      style={{
+        background: "#0d1528",
+        border: "1px solid rgba(71,85,105,0.6)",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+        minWidth: "140px",
+      }}
+    >
+      <p className="text-slate-400 mb-1.5">{row.date}</p>
+      <p style={{ color: scoreColor(row.sentiment_score) }}>
+        Score: {row.sentiment_score >= 0 ? "+" : ""}
+        {row.sentiment_score.toFixed(2)}
+      </p>
+      {row.confidence != null && (
+        <p className="text-slate-400">
+          Confidence: {(row.confidence * 100).toFixed(1)}%
+        </p>
+      )}
+      {row.sentiment_label && (
+        <p className="text-slate-500 capitalize mt-1">{row.sentiment_label}</p>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 /**
  * Sentiment badge component.
@@ -122,7 +191,13 @@ export default function TickerCard({ result }) {
   const [isHovered, setIsHovered] = useState(false);
   const [edgarExpanded, setEdgarExpanded] = useState(false);
   const [dcfInputsExpanded, setDcfInputsExpanded] = useState(false);
-  const [showTrendModal, setShowTrendModal] = useState(false);
+
+  // Sentiment trend tab state
+  const [trendHistory, setTrendHistory] = useState([]);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendError, setTrendError] = useState(null);
+  const [trendRange, setTrendRange] = useState("All");
+  const [trendFetched, setTrendFetched] = useState(false);
 
   const {
     ticker,
@@ -140,6 +215,46 @@ export default function TickerCard({ result }) {
 
   const showCompsTab = asset_type === "equity" && comps_data?.available === true;
 
+  // Fetch sentiment history when the trend tab is first activated
+  useEffect(() => {
+    if (activeTab !== "trend" || trendFetched) return;
+    let cancelled = false;
+    setTrendLoading(true);
+    setTrendError(null);
+
+    fetch(`/api/sentiment-history/${ticker}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const sorted = [...(data.history ?? [])].sort(
+          (a, b) => new Date(a.analyzed_at) - new Date(b.analyzed_at)
+        );
+        setTrendHistory(sorted);
+        setTrendFetched(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setTrendError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setTrendLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [activeTab, ticker, trendFetched]);
+
+  // Derived chart data
+  const selectedDays = RANGE_OPTIONS.find((o) => o.label === trendRange)?.days ?? null;
+  const chartData = filterByDays(trendHistory, selectedDays).map((row) => ({
+    ...row,
+    date: formatDate(row.analyzed_at),
+  }));
+  const scores = chartData.map((r) => r.sentiment_score);
+  const yMin = scores.length ? Math.min(-0.2, Math.min(...scores) - 0.05) : -1;
+  const yMax = scores.length ? Math.max(0.2,  Math.max(...scores) + 0.05) : 1;
+
   const assetTypeBadge = asset_type === "crypto"
     ? { label: "Crypto",  style: { color: "#F59E0B", borderColor: "rgba(245,158,11,0.4)",  background: "rgba(245,158,11,0.08)"  } }
     : asset_type === "etf"
@@ -156,7 +271,6 @@ export default function TickerCard({ result }) {
   const dcfAvailable = dcf_data && dcf_data.available;
 
   return (
-    <>
     <article
       className="rounded-lg p-6 animate-fade-in-up flex flex-col transition-all duration-200 ease-in-out"
       style={{
@@ -195,18 +309,9 @@ export default function TickerCard({ result }) {
           </span>
         </div>
 
-        {/* Sentiment badge + trend link — pushed to the right */}
-        <div className="flex flex-col items-end gap-1 shrink-0">
+        {/* Sentiment badge — pushed to the right */}
+        <div className="shrink-0">
           <SentimentBadge score={sentiment_score} confidenceScore={confidence_score} label={result.sentiment_label} />
-          <button
-            onClick={() => setShowTrendModal(true)}
-            className="text-xs font-medium transition-colors"
-            style={{ color: "#F59E0B" }}
-            onMouseEnter={(e) => (e.target.style.color = "#FCD34D")}
-            onMouseLeave={(e) => (e.target.style.color = "#F59E0B")}
-          >
-            View Trend →
-          </button>
         </div>
       </div>
 
@@ -219,6 +324,7 @@ export default function TickerCard({ result }) {
           { id: "risk",  label: "Risk Analysis" },
           { id: "dcf",   label: "DCF Valuation" },
           ...(showCompsTab ? [{ id: "comps", label: "Comps" }] : []),
+          { id: "trend", label: "Sentiment Trend" },
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -490,6 +596,7 @@ export default function TickerCard({ result }) {
           )}
         </div>
       )}
+
       {/* ── Comps tab ────────────────────────────────────────────────────── */}
       {activeTab === "comps" && showCompsTab && (
         <div
@@ -499,15 +606,132 @@ export default function TickerCard({ result }) {
           <CompsView compsData={comps_data} ticker={ticker} />
         </div>
       )}
-    </article>
 
-    {/* Sentiment trend modal — rendered outside the article so it isn't clipped */}
-    {showTrendModal && (
-      <SentimentTrendModal
-        ticker={ticker}
-        onClose={() => setShowTrendModal(false)}
-      />
-    )}
-  </>
+      {/* ── Sentiment Trend tab ──────────────────────────────────────────── */}
+      {activeTab === "trend" && (
+        <div
+          key="trend"
+          style={{ animation: "argus-fade-in 150ms ease-in-out" }}
+        >
+          {/* Time range toggle */}
+          <div className="flex gap-1 mb-4">
+            {RANGE_OPTIONS.map(({ label }) => (
+              <button
+                key={label}
+                onClick={() => setTrendRange(label)}
+                className="text-xs font-semibold px-3 py-1 rounded transition-colors"
+                style={
+                  trendRange === label
+                    ? { background: "rgba(245,158,11,0.15)", color: "#F59E0B", border: "1px solid rgba(245,158,11,0.35)" }
+                    : { background: "rgba(30,41,59,0.5)",    color: "#64748b", border: "1px solid rgba(51,65,85,0.4)"   }
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Chart area */}
+          <div style={{ minHeight: "220px" }}>
+            {trendLoading ? (
+              <div className="flex items-center justify-center" style={{ height: "220px" }}>
+                <p className="text-sm text-slate-500 animate-pulse">Loading history…</p>
+              </div>
+            ) : trendError ? (
+              <div className="flex items-center justify-center" style={{ height: "220px" }}>
+                <p className="text-sm text-slate-600 italic">Could not load sentiment history.</p>
+              </div>
+            ) : chartData.length === 0 ? (
+              <div className="flex items-center justify-center text-center px-4" style={{ height: "220px" }}>
+                <div>
+                  <p className="text-sm text-slate-400 mb-2">
+                    No sentiment history yet for{" "}
+                    <span className="mono font-semibold" style={{ color: "#F59E0B" }}>{ticker}</span>.
+                  </p>
+                  <p className="text-xs text-slate-600 italic">Analyze this ticker to start building history.</p>
+                </div>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: -8 }}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(51,65,85,0.4)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "#64748b", fontSize: 11 }}
+                    axisLine={{ stroke: "rgba(51,65,85,0.5)" }}
+                    tickLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    domain={[yMin, yMax]}
+                    tickCount={5}
+                    tick={{ fill: "#64748b", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => v.toFixed(1)}
+                  />
+                  <ReferenceLine y={0}    stroke="rgba(100,116,139,0.35)" strokeDasharray="4 4" />
+                  <ReferenceLine y={0.2}  stroke="rgba(74,222,128,0.2)"   strokeDasharray="3 5" />
+                  <ReferenceLine y={-0.2} stroke="rgba(248,113,113,0.2)"  strokeDasharray="3 5" />
+                  <Tooltip content={<TrendTooltip />} />
+                  <Line
+                    type="monotone"
+                    dataKey="sentiment_score"
+                    stroke="#F59E0B"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: "#F59E0B", strokeWidth: 0 }}
+                    activeDot={{ r: 5, fill: "#F59E0B", stroke: "white", strokeWidth: 1.5 }}
+                    isAnimationActive={true}
+                    animationDuration={500}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="confidence"
+                    stroke="#94A3B8"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+          {/* Legend */}
+          {!trendLoading && !trendError && chartData.length > 0 && (
+            <div className="flex items-center gap-5 mt-3 pt-3" style={{ borderTop: "1px solid rgba(51,65,85,0.35)" }}>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-6 h-0.5" style={{ background: "#F59E0B" }} />
+                <span className="text-xs text-slate-500">Sentiment score</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-6 h-0.5"
+                  style={{ background: "rgba(148,163,184,0.4)", borderTop: "1px dashed rgba(148,163,184,0.4)" }}
+                />
+                <span className="text-xs text-slate-500">Confidence</span>
+              </div>
+              <span className="text-xs text-slate-600 ml-auto">
+                {chartData.length} data point{chartData.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+          )}
+
+          {/* Disclaimer */}
+          <p
+            className="mt-3 text-slate-600 italic"
+            style={{ fontSize: "0.7rem", lineHeight: "1.5" }}
+          >
+            Scores generated by Argus's custom DistilBERT model. For informational purposes only.
+          </p>
+        </div>
+      )}
+    </article>
   );
 }

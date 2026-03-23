@@ -8,8 +8,10 @@ import AuthModal from "./components/AuthModal.jsx";
 import SavePortfolioModal from "./components/SavePortfolioModal.jsx";
 import SavedPortfoliosPanel from "./components/SavedPortfoliosPanel.jsx";
 import AnalysisHistoryPanel from "./components/AnalysisHistoryPanel.jsx";
+import LoadingScreen from "./components/LoadingScreen.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { isAuthEnabled } from "./lib/supabaseClient.js";
+import { exportAnalysisToPdf } from "./utils/exportPdf.js";
 
 // Application state machine states
 const STATE = {
@@ -25,40 +27,6 @@ const POLL_INTERVAL_MS = 3000;
 // Stop polling and show error after this many consecutive network failures
 const MAX_NETWORK_FAILURES = 5;
 
-/**
- * Animated loading view.
- * Displays the real-time status_message coming from the backend poll response.
- */
-function LoadingView({ statusMessage }) {
-  return (
-    <div
-      className="flex flex-col items-center justify-center gap-8 animate-fade-in-up"
-      style={{ minHeight: "calc(100vh - 72px)" }}
-    >
-      {/* Amber spinner — 80px diameter, 3px stroke */}
-      <div className="relative" style={{ width: 80, height: 80 }}>
-        <div
-          className="absolute inset-0 rounded-full"
-          style={{ border: "3px solid rgba(71,85,105,0.4)" }}
-        />
-        <div className="absolute inset-0 rounded-full spinner-ring" />
-      </div>
-
-      {/* Real-time status message from backend */}
-      <div className="text-center px-4">
-        <p className="text-xl font-semibold text-slate-100 mb-2">
-          {statusMessage || "Starting analysis..."}
-        </p>
-      </div>
-
-      {/* Static secondary note */}
-      <p className="text-sm text-slate-500 text-center -mt-4">
-        This may take 20–60 seconds for larger portfolios.
-      </p>
-    </div>
-  );
-}
-
 export default function App() {
   const { user, session, signOut } = useAuth();
 
@@ -66,6 +34,7 @@ export default function App() {
   const [analysisData, setAnalysisData] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [progress, setProgress] = useState(0);
 
   // Auth modal
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -83,6 +52,21 @@ export default function App() {
   const [nudgeDismissed, setNudgeDismissed] = useState(
     () => sessionStorage.getItem("argus_nudge_dismissed") === "1"
   );
+
+  // PDF export
+  const [pdfExporting, setPdfExporting] = useState(false);
+
+  async function handleExportPdf() {
+    if (!analysisData || pdfExporting) return;
+    setPdfExporting(true);
+    try {
+      await exportAnalysisToPdf(analysisData, "My Portfolio");
+    } catch (err) {
+      showToast("PDF export failed. Please try again.", "error");
+    } finally {
+      setPdfExporting(false);
+    }
+  }
 
   // Ephemeral toast (success / error feedback)
   const [toastMessage, setToastMessage] = useState("");
@@ -132,6 +116,7 @@ export default function App() {
     setErrorMessage("");
     setAnalysisData(null);
     setStatusMessage("");
+    setProgress(0);
 
     // ── Step 1: submit job ────────────────────────────────────────────────
     let jobId;
@@ -182,15 +167,19 @@ export default function App() {
         networkFailuresRef.current = 0;
         const job = await res.json();
 
-        // Update the displayed status message
-        if (job.status_message) {
-          setStatusMessage(job.status_message);
-        }
+        // Update progress and status message
+        if (job.status_message) setStatusMessage(job.status_message);
+        if (job.progress != null) setProgress(job.progress);
 
         if (job.status === "complete") {
           _clearPoll();
-          setAnalysisData(job.results);
-          setAppState(STATE.RESULTS);
+          // Brief 100% flash before transitioning to results
+          setProgress(100);
+          setStatusMessage("Analysis complete.");
+          setTimeout(() => {
+            setAnalysisData(job.results);
+            setAppState(STATE.RESULTS);
+          }, 600);
         } else if (job.status === "failed") {
           _clearPoll();
           setErrorMessage(job.error || "Analysis failed. Please try again.");
@@ -214,6 +203,7 @@ export default function App() {
     setAnalysisData(null);
     setErrorMessage("");
     setStatusMessage("");
+    setProgress(0);
   }
 
   // Load a saved portfolio: reconstruct the payload and trigger a new analysis
@@ -343,8 +333,10 @@ export default function App() {
           </div>
         )}
 
-        {/* Loading state — real-time status from backend */}
-        {appState === STATE.LOADING && <LoadingView statusMessage={statusMessage} />}
+        {/* Loading state — real-time progress from backend */}
+        {appState === STATE.LOADING && (
+          <LoadingScreen progress={progress} statusMessage={statusMessage} />
+        )}
 
         {/* Error state */}
         {appState === STATE.ERROR && (
@@ -424,6 +416,16 @@ export default function App() {
                 <span className="text-xs text-slate-500/70 mono">
                   {analysisData.results.length} position{analysisData.results.length !== 1 ? "s" : ""}
                 </span>
+                {/* Export PDF */}
+                <button
+                  onClick={handleExportPdf}
+                  disabled={pdfExporting}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  style={{ color: "rgba(148,163,184,0.7)", border: "1px solid rgba(71,85,105,0.35)", background: "transparent", opacity: pdfExporting ? 0.5 : 1 }}
+                >
+                  {pdfExporting ? "Exporting..." : "Export PDF"}
+                </button>
+
                 {/* Save Portfolio + History */}
                 {isAuthEnabled && (
                   <>
