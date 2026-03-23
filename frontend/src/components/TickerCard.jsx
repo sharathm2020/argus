@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import CompsView from "./CompsView";
+import SensitivityTable from "./SensitivityTable";
 
 // ── Sentiment trend helpers ────────────────────────────────────────────────────
 
@@ -555,6 +556,9 @@ export default function TickerCard({ result }) {
                   }}
                 />
               </div>
+
+              {/* Sensitivity table */}
+              <SensitivityTable data={dcf_data?.sensitivity_table} />
 
               {/* Collapsible inputs */}
               <div className="mt-1">

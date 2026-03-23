@@ -243,6 +243,7 @@ async def calculate_dcf(
             "inputs": {
                 "free_cash_flow": float(fcf),
                 "growth_rate": round(float(growth_rate), 4),
+                "revenue_growth": round(float(raw_growth), 4),  # uncapped, for comps pass-through
                 "discount_rate": round(float(discount_rate), 4),
                 "beta": round(float(beta), 2),
                 "terminal_growth_rate": terminal_growth_rate,
@@ -254,3 +255,76 @@ async def calculate_dcf(
     except Exception as exc:
         logger.warning("DCF calculation failed for %s: %s", ticker, exc)
         return {"available": False, "reason": f"Data retrieval error: {type(exc).__name__}"}
+
+
+def compute_sensitivity_table(
+    base_fcf: float,
+    shares_outstanding: float,
+    base_discount_rate: float,
+    base_terminal_growth: float,
+    base_revenue_growth: float,
+    current_price: float,
+) -> dict | None:
+    """
+    Build a 5×5 sensitivity grid varying discount rate and terminal growth rate.
+
+    Discount rate axis (columns):      base ± 2% in 1% steps.
+    Terminal growth rate axis (rows):  base ± 2% in 1% steps.
+
+    Each cell runs the same 5-year DCF formula with those rate substitutions.
+    Cell values are capped at 10× current_price to suppress extreme outliers.
+
+    Returns None when inputs are insufficient.
+    """
+    if not base_fcf or base_fcf <= 0 or not shares_outstanding or shares_outstanding <= 0:
+        return None
+    if not current_price or current_price <= 0:
+        return None
+
+    try:
+        discount_rates     = [round(base_discount_rate     + (i - 2) * 0.01, 4) for i in range(5)]
+        terminal_growths   = [round(base_terminal_growth   + (i - 2) * 0.01, 4) for i in range(5)]
+
+        # Clamp to sensible minimums
+        discount_rates   = [max(0.01, dr)  for dr in discount_rates]
+        terminal_growths = [max(0.001, tgr) for tgr in terminal_growths]
+
+        growth_rate = base_revenue_growth  # use capped revenue growth from main DCF
+        cap = current_price * 10.0
+
+        intrinsic_values: list[list] = []
+        for tgr in terminal_growths:
+            row: list = []
+            for dr in discount_rates:
+                try:
+                    if dr <= tgr:
+                        # Gordon Growth Model requires dr > tgr
+                        row.append(None)
+                        continue
+                    projected_fcfs = [base_fcf * (1 + growth_rate) ** yr for yr in range(1, 6)]
+                    discounted_fcfs = [pf / (1 + dr) ** yr for yr, pf in enumerate(projected_fcfs, 1)]
+                    year5_fcf = projected_fcfs[-1]
+                    terminal_value = (year5_fcf * (1 + tgr)) / (dr - tgr)
+                    discounted_tv  = terminal_value / (1 + dr) ** _PROJECTION_YEARS
+                    total = sum(discounted_fcfs) + discounted_tv
+                    val   = total / shares_outstanding
+                    if val <= 0:
+                        row.append(None)
+                    else:
+                        row.append(round(min(val, cap), 2))
+                except Exception:
+                    row.append(None)
+            intrinsic_values.append(row)
+
+        return {
+            "discount_rates":       discount_rates,
+            "terminal_growth_rates": terminal_growths,
+            "intrinsic_values":     intrinsic_values,
+            "current_price":        current_price,
+            "base_discount_rate":   base_discount_rate,
+            "base_terminal_growth": base_terminal_growth,
+        }
+
+    except Exception as exc:
+        logger.warning("compute_sensitivity_table failed: %s", exc)
+        return None

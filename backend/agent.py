@@ -22,7 +22,7 @@ from prompts.risk_narrative import (
 from job_store import job_store, JobStatus
 from db.supabase_client import write_sentiment_history, save_analysis_history
 from sentiment_analyzer import analyze_sentiment
-from tools.dcf import calculate_dcf, fetch_risk_free_rate
+from tools.dcf import calculate_dcf, fetch_risk_free_rate, compute_sensitivity_table
 from tools.hedging import generate_hedging_suggestions, generate_options_hedge
 from tools.portfolio_analysis import calculate_sector_concentration
 from utils.asset_classifier import classify_ticker
@@ -97,15 +97,43 @@ async def analyze_ticker(
     chain = prompt | ticker_llm | json_output_parser
 
     # Run LLM + DCF concurrently for equities; skip DCF for crypto/ETF.
-    # Comps runs after DCF to avoid peak FMP connection contention.
+    # Comps runs after DCF so it can receive DCF-derived revenue_growth + current_price.
     if asset_type == "equity":
         llm_result, dcf_data = await asyncio.gather(
             chain.ainvoke({}),
             calculate_dcf(ticker, risk_free_rate=risk_free_rate),
             return_exceptions=True,
         )
+
+        # ── Resolve DCF exception before comps so we can pass through data ──
+        if isinstance(dcf_data, Exception):
+            logger.warning("DCF calculation failed for %s: %s", ticker, dcf_data)
+            dcf_data = {"available": False, "reason": "Calculation error"}
+
+        # ── ARG-52: attach sensitivity table when DCF succeeded ──────────────
+        if isinstance(dcf_data, dict) and dcf_data.get("available"):
+            try:
+                _inp = dcf_data.get("inputs", {})
+                dcf_data["sensitivity_table"] = compute_sensitivity_table(
+                    base_fcf=_inp["free_cash_flow"],
+                    shares_outstanding=_inp["shares_outstanding"],
+                    base_discount_rate=_inp["discount_rate"],
+                    base_terminal_growth=_inp["terminal_growth_rate"],
+                    base_revenue_growth=_inp["growth_rate"],
+                    current_price=dcf_data["current_price"],
+                )
+            except Exception as exc:
+                logger.warning("Sensitivity table failed for %s: %s", ticker, exc)
+                dcf_data["sensitivity_table"] = None
+
+        # ── ARG-50/51: pass DCF-derived data through to comps ────────────────
+        _dcf_inputs = dcf_data.get("inputs", {}) if dcf_data.get("available") else {}
         try:
-            comps_data = await calculate_comps(ticker)
+            comps_data = await calculate_comps(
+                ticker,
+                subject_price=dcf_data.get("current_price") if dcf_data.get("available") else None,
+                revenue_growth=_dcf_inputs.get("revenue_growth"),
+            )
         except Exception as exc:
             logger.warning("Comps failed for %s: %s", ticker, exc)
             comps_data = None
@@ -130,6 +158,7 @@ async def analyze_ticker(
         parsed = llm_result
         result_headlines = news_headlines
 
+    # DCF exception is now resolved above for equities; handle the non-equity path
     if isinstance(dcf_data, Exception):
         logger.warning("DCF calculation failed for %s: %s", ticker, dcf_data)
         dcf_data = {"available": False, "reason": "Calculation error"}
